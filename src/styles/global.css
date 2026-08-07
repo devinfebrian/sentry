@@ -1613,10 +1613,35 @@ kbd {
 }
 
 .workspace-members .data-table {
-  min-width: 560px;
+  min-width: 680px;
 }
 
 .member-self {
+  color: var(--color-slate);
+  font: var(--text-caption);
+}
+
+.member-identity {
+  font: var(--text-label);
+}
+
+.member-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+/* The full 44px control height makes table rows unreadably tall, so row
+   actions get a compact variant of the same button shape. */
+.member-actions .button {
+  min-height: 32px;
+  padding: 5px 10px;
+  font: var(--text-caption);
+}
+
+.member-action-hint {
+  flex-basis: 100%;
   color: var(--color-slate);
   font: var(--text-caption);
 }
