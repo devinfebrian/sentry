@@ -30,9 +30,17 @@ Each function returns the resulting membership as `jsonb` — `{workspace_id, us
 
 `sentinel_set_member_role(p_workspace_id, p_user_id, p_role)` validates the role against `analyst|manager`, locks the row, and no-ops when the role is unchanged. A manager-to-analyst change first runs the last-manager guard. It then updates and inserts `member-role-changed` carrying `{from, to}`.
 
-`sentinel_reject_invitation(p_workspace_id, p_user_id)` raises `P0001 Only pending invitations can be rejected.` for any other status. It captures the member's `invited_email`, deletes the member row, and inserts `member-invite-rejected`. When `invited_email` is non-null it also sets the reservation matched on `(workspace_id, lower(email))` — the same key as the unique index — to `failed` and bumps `updated_at`; a null `invited_email` means no reservation was ever created for this membership, so the update is skipped. `failed` rather than deletion because `claimReservation` already treats a failed reservation as immediately re-claimable, so re-inviting the address works with the grants that exist.
+`sentinel_reject_invitation(p_workspace_id, p_user_id)` raises `P0001 Only pending invitations can be rejected.` for any other status. It captures the member's `invited_email`, deletes the member row, and inserts `member-invite-rejected` carrying `member_user_id` only. The address is deliberately excluded from the event: `sentinel_activity_events` is readable by every active member, while `invited_email` is withheld from analysts by column grant, so recording it there would route a blocked column into an open one. When `invited_email` is non-null it also sets the reservation matched on `(workspace_id, lower(email))` — the same key as the unique index — to `failed` and bumps `updated_at`; a null `invited_email` means no reservation was ever created for this membership, so the update is skipped. `failed` rather than deletion because `claimReservation` already treats a failed reservation as immediately re-claimable, so re-inviting the address works with the grants that exist.
 
-The guard reads:
+All three functions take a transaction-scoped advisory lock keyed on the workspace before touching any row:
+
+```sql
+perform pg_advisory_xact_lock(hashtext('sentinel_members:' || p_workspace_id::text));
+```
+
+Row-level lock ordering alone cannot make the guard safe. Each function locks its target member row first, so two concurrent demotions of different managers deadlock — T1 holds M1 and wants M2 while T2 holds M2 and wants M1 — regardless of any `order by` inside the guard query. The advisory lock serializes every membership mutation per workspace instead, which is correct by construction and cheap for workspaces of this size. It is taken in all three functions, not just the demotion path, so activation and rejection cannot interleave with a demotion either.
+
+The guard itself then reads:
 
 ```sql
 select count(*) into manager_count
@@ -40,7 +48,6 @@ from (
   select 1 from public.sentinel_members
   where workspace_id = p_workspace_id
     and role = 'manager' and status = 'active'
-  order by user_id
   for update
 ) as locked;
 
@@ -50,7 +57,7 @@ if manager_count <= 1 then
 end if;
 ```
 
-`for update` cannot sit beside an aggregate, hence the subquery. `order by user_id` gives concurrent callers a consistent lock order so they serialize instead of deadlocking. The rows stay locked for the remainder of the transaction, so the count cannot go stale before the update lands.
+`for update` cannot sit beside an aggregate, hence the subquery. The rows stay locked for the remainder of the transaction, so the count cannot go stale before the update lands.
 
 ## Service layer
 
