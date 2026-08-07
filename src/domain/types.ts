@@ -65,6 +65,7 @@ export interface SentinelMemberService {
   invite(email: string): Promise<void>;
   activate(userId: string): Promise<void>;
   setRole(userId: string, role: SentinelMemberRole): Promise<void>;
+  rejectInvitation(userId: string): Promise<void>;
 }
 
 export interface EvidenceRecord {

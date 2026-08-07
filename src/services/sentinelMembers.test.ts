@@ -312,4 +312,40 @@ describe("createSentinelMemberService", () => {
       );
     });
   });
+
+  describe("rejectInvitation", () => {
+    it("calls the reject RPC with the workspace and member", async () => {
+      const { client, rpc } = createClient();
+      const service = createSentinelMemberService(client, { workspaceId, userId: managerId, role: "manager" });
+
+      await service.rejectInvitation(analystId);
+
+      expect(rpc).toHaveBeenCalledWith("sentinel_reject_invitation", {
+        p_workspace_id: workspaceId,
+        p_user_id: analystId,
+      });
+    });
+
+    it("surfaces the non-pending refusal verbatim", async () => {
+      const { client } = createClient({
+        rpcResult: { data: null, error: { code: "P0001", message: "Only pending invitations can be rejected." } },
+      });
+      const service = createSentinelMemberService(client, { workspaceId, userId: managerId, role: "manager" });
+
+      await expect(service.rejectInvitation(analystId)).rejects.toThrow(
+        "Only pending invitations can be rejected.",
+      );
+    });
+
+    it("wraps an unrecognised failure with the operation name", async () => {
+      const { client } = createClient({
+        rpcResult: { data: null, error: { code: "08006", message: "connection failure" } },
+      });
+      const service = createSentinelMemberService(client, { workspaceId, userId: managerId, role: "manager" });
+
+      await expect(service.rejectInvitation(analystId)).rejects.toThrow(
+        "Unable to reject invitation: connection failure",
+      );
+    });
+  });
 });

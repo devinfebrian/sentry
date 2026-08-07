@@ -156,5 +156,14 @@ export function createSentinelMemberService(
 
       if (error) throw mapRpcError("change member role", error);
     },
+
+    async rejectInvitation(userId) {
+      const { error } = await client.rpc("sentinel_reject_invitation", {
+        p_workspace_id: context.workspaceId,
+        p_user_id: userId,
+      });
+
+      if (error) throw mapRpcError("reject invitation", error);
+    },
   };
 }
