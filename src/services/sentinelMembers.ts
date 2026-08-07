@@ -26,6 +26,8 @@ type MemberReadQuery = {
   };
 };
 
+export type RpcError = { message?: string; code?: string };
+
 export type SentinelMemberClient = {
   from(table: MemberSource): {
     select(columns: string): MemberReadQuery;
@@ -36,6 +38,10 @@ export type SentinelMemberClient = {
       options: { body: { email: string; role: "analyst" } },
     ): Promise<{ data: unknown; error: unknown }>;
   };
+  rpc(
+    name: "sentinel_activate_member" | "sentinel_set_member_role" | "sentinel_reject_invitation",
+    args: Record<string, string>,
+  ): Promise<{ data: unknown; error: RpcError | null }>;
 };
 
 // Mirrors normalizeEmail in supabase/functions/_shared/auth-policy.ts so an obviously
@@ -49,6 +55,21 @@ export const GENERIC_INVITE_ERROR = "Unable to invite member.";
 function mapError(operation: string, error: { message?: string } | null) {
   const message = error?.message || "Unknown Supabase error.";
   return new Error(`Unable to ${operation}: ${message}`);
+}
+
+export const MEMBER_NOT_FOUND_ERROR = "Member not found. Reload the roster and try again.";
+export const MANAGER_REQUIRED_ERROR = "Manager membership required.";
+
+/**
+ * The RPCs raise P0001 with finished user-facing prose, so those messages are
+ * shown as written rather than wrapped. Mirrors how processing.ts keys off
+ * P0001 for a lost processing lease.
+ */
+export function mapRpcError(operation: string, error: RpcError | null) {
+  if (error?.code === "P0001" && error.message?.trim()) return new Error(error.message);
+  if (error?.code === "P0002") return new Error(MEMBER_NOT_FOUND_ERROR);
+  if (error?.code === "42501") return new Error(MANAGER_REQUIRED_ERROR);
+  return mapError(operation, error);
 }
 
 /** Shared with WorkspacePage so the form rejects a bad address before any network call. */
@@ -115,6 +136,15 @@ export function createSentinelMemberService(
       });
 
       if (error) throw new Error(await inviteErrorMessage(error));
+    },
+
+    async activate(userId) {
+      const { error } = await client.rpc("sentinel_activate_member", {
+        p_workspace_id: context.workspaceId,
+        p_user_id: userId,
+      });
+
+      if (error) throw mapRpcError("activate member", error);
     },
   };
 }

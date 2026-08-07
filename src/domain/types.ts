@@ -63,6 +63,7 @@ export interface SentinelMember {
 export interface SentinelMemberService {
   list(): Promise<SentinelMember[]>;
   invite(email: string): Promise<void>;
+  activate(userId: string): Promise<void>;
 }
 
 export interface EvidenceRecord {

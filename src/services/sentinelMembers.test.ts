@@ -34,17 +34,19 @@ interface ClientOptions {
   rows?: MemberRow[];
   listError?: { message: string } | null;
   invokeResult?: { data: unknown; error: unknown };
+  rpcResult?: { data: unknown; error: { message?: string; code?: string } | null };
 }
 
-function createClient({ rows = [], listError = null, invokeResult }: ClientOptions = {}) {
+function createClient({ rows = [], listError = null, invokeResult, rpcResult }: ClientOptions = {}) {
   const order = vi.fn(async () => ({ data: listError ? null : rows, error: listError }));
   const eq = vi.fn(() => ({ order }));
   const select = vi.fn(() => ({ eq }));
   const from = vi.fn(() => ({ select }));
   const invoke = vi.fn(async () => invokeResult ?? { data: { invited: true }, error: null });
+  const rpc = vi.fn(async () => rpcResult ?? { data: null, error: null });
 
-  const client = { from, functions: { invoke } } as unknown as SentinelMemberClient;
-  return { client, from, select, eq, order, invoke };
+  const client = { from, functions: { invoke }, rpc } as unknown as SentinelMemberClient;
+  return { client, from, select, eq, order, invoke, rpc };
 }
 
 function httpError(status: number, body: unknown) {
@@ -212,6 +214,65 @@ describe("createSentinelMemberService", () => {
       const service = createSentinelMemberService(client, { workspaceId, userId: managerId, role: "manager" });
 
       await expect(service.invite("analyst@example.com")).resolves.toBeUndefined();
+    });
+  });
+
+  describe("activate", () => {
+    it("calls the activate RPC with the workspace and member", async () => {
+      const { client, rpc } = createClient();
+      const service = createSentinelMemberService(client, { workspaceId, userId: managerId, role: "manager" });
+
+      await service.activate(analystId);
+
+      expect(rpc).toHaveBeenCalledWith("sentinel_activate_member", {
+        p_workspace_id: workspaceId,
+        p_user_id: analystId,
+      });
+    });
+
+    it("resolves when the RPC succeeds", async () => {
+      const { client } = createClient({
+        rpcResult: { data: { workspace_id: workspaceId, user_id: analystId, role: "analyst", status: "active" }, error: null },
+      });
+      const service = createSentinelMemberService(client, { workspaceId, userId: managerId, role: "manager" });
+
+      await expect(service.activate(analystId)).resolves.toBeUndefined();
+    });
+
+    it("surfaces a P0001 business rule message verbatim", async () => {
+      const { client } = createClient({
+        rpcResult: { data: null, error: { code: "P0001", message: "Workspace must keep at least one manager." } },
+      });
+      const service = createSentinelMemberService(client, { workspaceId, userId: managerId, role: "manager" });
+
+      await expect(service.activate(analystId)).rejects.toThrow("Workspace must keep at least one manager.");
+    });
+
+    it("maps P0002 to a reload instruction", async () => {
+      const { client } = createClient({
+        rpcResult: { data: null, error: { code: "P0002", message: "Member not found." } },
+      });
+      const service = createSentinelMemberService(client, { workspaceId, userId: managerId, role: "manager" });
+
+      await expect(service.activate(analystId)).rejects.toThrow("Member not found. Reload the roster and try again.");
+    });
+
+    it("maps 42501 to the manager-required message", async () => {
+      const { client } = createClient({
+        rpcResult: { data: null, error: { code: "42501", message: "Manager membership required." } },
+      });
+      const service = createSentinelMemberService(client, { workspaceId, userId: analystId, role: "analyst" });
+
+      await expect(service.activate(analystId)).rejects.toThrow("Manager membership required.");
+    });
+
+    it("wraps an unrecognised failure with the operation name", async () => {
+      const { client } = createClient({
+        rpcResult: { data: null, error: { code: "08006", message: "connection failure" } },
+      });
+      const service = createSentinelMemberService(client, { workspaceId, userId: managerId, role: "manager" });
+
+      await expect(service.activate(analystId)).rejects.toThrow("Unable to activate member: connection failure");
     });
   });
 });
