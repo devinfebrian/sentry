@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { Button } from "../components/ui/Button";
 import { EmptyState } from "../components/ui/EmptyState";
 import { ErrorState } from "../components/ui/ErrorState";
@@ -6,16 +6,12 @@ import { LoadingState } from "../components/ui/LoadingState";
 import { StatusBadge } from "../components/ui/StatusBadge";
 import { INVALID_EMAIL_ERROR, normalizeMemberEmail } from "../services/sentinelMembers";
 import type { SentinelMember, SentinelMemberRole, SentinelMemberService } from "../domain/types";
+import { useWorkspaceMembers } from "./useWorkspaceMembers";
 
 interface WorkspacePageProps {
   memberService?: Pick<SentinelMemberService, "list" | "invite"> | null;
   role?: SentinelMemberRole | null;
 }
-
-type LoadState =
-  | { status: "loading" }
-  | { status: "error"; error: unknown }
-  | { status: "ready"; members: SentinelMember[] };
 
 const roleLabels: Record<SentinelMemberRole, string> = { analyst: "Analyst", manager: "Manager" };
 const statusLabels: Record<SentinelMember["status"], string> = { active: "Active", pending: "Pending" };
@@ -30,43 +26,13 @@ function joinedLabel(joinedAt: string) {
 }
 
 export function WorkspacePage({ memberService, role }: WorkspacePageProps) {
-  const [state, setState] = useState<LoadState>({ status: "loading" });
-  const [retryKey, setRetryKey] = useState(0);
   const [email, setEmail] = useState("");
   const [inviting, setInviting] = useState(false);
   const [inviteError, setInviteError] = useState("");
   const [inviteNotice, setInviteNotice] = useState("");
-  const requestIdRef = useRef(0);
   const isManager = role === "manager";
 
-  useEffect(() => {
-    const requestId = ++requestIdRef.current;
-    let active = true;
-    const isCurrent = () => active && requestIdRef.current === requestId;
-
-    setState({ status: "loading" });
-    if (!memberService) {
-      setState({ status: "error", error: new Error("Workspace member directory is unavailable. Sign in again and retry.") });
-      return () => {
-        active = false;
-      };
-    }
-
-    void Promise.resolve()
-      .then(() => memberService.list())
-      .then((members) => {
-        if (isCurrent()) setState({ status: "ready", members });
-      })
-      .catch((error: unknown) => {
-        if (isCurrent()) setState({ status: "error", error });
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [memberService, retryKey]);
-
-  const retry = () => setRetryKey((current) => current + 1);
+  const { state, members, retry, mutate } = useWorkspaceMembers(memberService);
 
   const handleInvite = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -81,33 +47,16 @@ export function WorkspacePage({ memberService, role }: WorkspacePageProps) {
       return;
     }
 
-    const requestId = requestIdRef.current;
     setInviting(true);
-    try {
-      await memberService.invite(normalized);
-    } catch (caught) {
-      setInviteError(caught instanceof Error ? caught.message : "Unable to invite member.");
-      setInviting(false);
-      return;
-    }
-
-    setEmail("");
-    const sent = `Invitation sent to ${normalized}. The member stays pending until they accept.`;
-    try {
-      const members = await memberService.list();
-      // Skip the refresh if the effect re-ran while the invitation was in flight.
-      if (requestIdRef.current === requestId) setState({ status: "ready", members });
-      setInviteNotice(sent);
-    } catch {
-      // The invitation succeeded; only the roster refresh failed. Say so rather than
-      // reporting the invitation itself as failed.
-      setInviteNotice(`${sent} The member list could not be refreshed — reload to see it.`);
-    } finally {
-      setInviting(false);
-    }
+    const outcome = await mutate(
+      () => memberService.invite(normalized),
+      `Invitation sent to ${normalized}. The member stays pending until they accept.`,
+    );
+    if (outcome.ok) setEmail("");
+    if (outcome.ok) setInviteNotice(outcome.message);
+    else setInviteError(outcome.message);
+    setInviting(false);
   };
-
-  const members = state.status === "ready" ? state.members : [];
 
   return (
     <div className="workspace-settings-page">
