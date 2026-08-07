@@ -1536,7 +1536,6 @@ test.describe("manager member management", () => {
 
   test("activates a pending member and records the event", async ({ page }) => {
     const token = await openWorkspace(page);
-    const workspaceId = await workspaceIdFor(token);
     const email = uniqueEmail();
 
     await page.getByRole("textbox", { name: /email/i }).fill(email);
@@ -1561,7 +1560,6 @@ test.describe("manager member management", () => {
     // No cleanup. An activated member can no longer be rejected, and this slice
     // has no offboarding path by design. uniqueEmail() gives every run its own
     // member, and an extra active analyst affects no other assertion.
-    expect(workspaceId).toBeTruthy();
   });
 
   test("refuses to demote the last active manager", async ({ page }) => {
