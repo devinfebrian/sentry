@@ -9,7 +9,7 @@ import type { SentinelMember, SentinelMemberRole, SentinelMemberService } from "
 import { useWorkspaceMembers } from "./useWorkspaceMembers";
 
 interface WorkspacePageProps {
-  memberService?: Pick<SentinelMemberService, "list" | "invite"> | null;
+  memberService?: Pick<SentinelMemberService, "list" | "invite" | "activate" | "setRole" | "rejectInvitation"> | null;
   role?: SentinelMemberRole | null;
 }
 
@@ -32,7 +32,25 @@ export function WorkspacePage({ memberService, role }: WorkspacePageProps) {
   const [inviteNotice, setInviteNotice] = useState("");
   const isManager = role === "manager";
 
-  const { state, members, retry, mutate } = useWorkspaceMembers(memberService);
+  const { state, members, activeManagerCount, retry, mutate } = useWorkspaceMembers(memberService);
+  const [busyUserId, setBusyUserId] = useState<string | null>(null);
+  const [confirmingRejectId, setConfirmingRejectId] = useState<string | null>(null);
+  // Narrowed once, so the row actions need no non-null assertions. A null service
+  // puts the hook in its error state, so the table never renders without one.
+  const actions = isManager && memberService ? memberService : null;
+
+  const runAction = async (userId: string, action: () => Promise<void>, successMessage: string) => {
+    if (busyUserId) return;
+
+    setInviteError("");
+    setInviteNotice("");
+    setBusyUserId(userId);
+    const outcome = await mutate(action, successMessage, { refreshOnFailure: true });
+    if (outcome.ok) setInviteNotice(outcome.message);
+    else setInviteError(outcome.message);
+    setBusyUserId(null);
+    setConfirmingRejectId(null);
+  };
 
   const handleInvite = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -102,6 +120,7 @@ export function WorkspacePage({ memberService, role }: WorkspacePageProps) {
                   <th scope="col">Role</th>
                   <th scope="col">Status</th>
                   <th scope="col">Joined</th>
+                  {actions && <th scope="col">Actions</th>}
                 </tr>
               </thead>
               <tbody>
@@ -120,6 +139,83 @@ export function WorkspacePage({ memberService, role }: WorkspacePageProps) {
                       />
                     </td>
                     <td className="numeric">{joinedLabel(member.joinedAt)}</td>
+                    {actions && (
+                      <td className="member-actions">
+                        {member.status === "pending" ? (
+                          <>
+                            <Button
+                              variant="secondary"
+                              type="button"
+                              disabled={busyUserId !== null}
+                              onClick={() => void runAction(
+                                member.userId,
+                                () => actions.activate(member.userId),
+                                `${member.email ?? "Member"} activated.`,
+                              )}
+                            >
+                              Activate
+                            </Button>
+                            {confirmingRejectId === member.userId ? (
+                              <>
+                                <Button
+                                  variant="destructive"
+                                  type="button"
+                                  disabled={busyUserId !== null}
+                                  onClick={() => void runAction(
+                                    member.userId,
+                                    () => actions.rejectInvitation(member.userId),
+                                    `Invitation for ${member.email ?? "member"} rejected.`,
+                                  )}
+                                >
+                                  Confirm reject
+                                </Button>
+                                <Button variant="quiet" type="button" onClick={() => setConfirmingRejectId(null)}>Cancel</Button>
+                              </>
+                            ) : (
+                              <Button
+                                variant="quiet"
+                                type="button"
+                                disabled={busyUserId !== null}
+                                onClick={() => setConfirmingRejectId(member.userId)}
+                              >
+                                Reject
+                              </Button>
+                            )}
+                          </>
+                        ) : member.role === "analyst" ? (
+                          <Button
+                            variant="secondary"
+                            type="button"
+                            disabled={busyUserId !== null}
+                            onClick={() => void runAction(
+                              member.userId,
+                              () => actions.setRole(member.userId, "manager"),
+                              `${member.email ?? "Member"} is now a manager.`,
+                            )}
+                          >
+                            Make manager
+                          </Button>
+                        ) : (
+                          <>
+                            <Button
+                              variant="secondary"
+                              type="button"
+                              disabled={busyUserId !== null || activeManagerCount <= 1}
+                              onClick={() => void runAction(
+                                member.userId,
+                                () => actions.setRole(member.userId, "analyst"),
+                                `${member.email ?? "Member"} is now an analyst.`,
+                              )}
+                            >
+                              Make analyst
+                            </Button>
+                            {activeManagerCount <= 1 && (
+                              <span className="member-action-hint">Workspace must keep at least one manager.</span>
+                            )}
+                          </>
+                        )}
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>

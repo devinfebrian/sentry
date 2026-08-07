@@ -23,10 +23,21 @@ const analyst: SentinelMember = {
   isSelf: false,
 };
 
-function memberService(overrides: Partial<{ list: () => Promise<SentinelMember[]>; invite: (email: string) => Promise<void> }> = {}) {
+function memberService(
+  overrides: Partial<{
+    list: () => Promise<SentinelMember[]>;
+    invite: (email: string) => Promise<void>;
+    activate: (userId: string) => Promise<void>;
+    setRole: (userId: string, role: "analyst" | "manager") => Promise<void>;
+    rejectInvitation: (userId: string) => Promise<void>;
+  }> = {},
+) {
   return {
     list: vi.fn(overrides.list ?? (async () => [manager, analyst])),
     invite: vi.fn(overrides.invite ?? (async () => undefined)),
+    activate: vi.fn(overrides.activate ?? (async () => undefined)),
+    setRole: vi.fn(overrides.setRole ?? (async () => undefined)),
+    rejectInvitation: vi.fn(overrides.rejectInvitation ?? (async () => undefined)),
   };
 }
 
@@ -105,6 +116,9 @@ describe("WorkspacePage", () => {
         .mockResolvedValueOnce([manager])
         .mockRejectedValueOnce(new Error("network unavailable")),
       invite: vi.fn(async () => undefined),
+      activate: vi.fn(async () => undefined),
+      setRole: vi.fn(async () => undefined),
+      rejectInvitation: vi.fn(async () => undefined),
     };
     renderPage({ memberService: service, role: "manager" });
 
@@ -128,6 +142,9 @@ describe("WorkspacePage", () => {
         .mockRejectedValueOnce(new Error("network unavailable"))
         .mockResolvedValueOnce([manager]),
       invite: vi.fn(async () => undefined),
+      activate: vi.fn(async () => undefined),
+      setRole: vi.fn(async () => undefined),
+      rejectInvitation: vi.fn(async () => undefined),
     };
     renderPage({ memberService: service, role: "manager" });
 
@@ -155,6 +172,9 @@ describe("WorkspacePage", () => {
     const staleService = {
       list: vi.fn(() => new Promise<SentinelMember[]>((resolve) => { resolveStale = resolve; })),
       invite: vi.fn(async () => undefined),
+      activate: vi.fn(async () => undefined),
+      setRole: vi.fn(async () => undefined),
+      rejectInvitation: vi.fn(async () => undefined),
     };
     const currentService = memberService({ list: async () => [manager] });
     const { rerender } = render(<MemoryRouter><WorkspacePage memberService={staleService} role="manager" /></MemoryRouter>);
@@ -173,5 +193,103 @@ describe("WorkspacePage", () => {
 
     const table = await screen.findByRole("table", { name: /workspace members/i });
     expect(within(table).getByText(seeded.userId)).toBeInTheDocument();
+  });
+});
+
+describe("member actions", () => {
+  const secondManager: SentinelMember = {
+    userId: "44444444-4444-4444-8444-444444444444",
+    email: "second@example.com",
+    role: "manager",
+    status: "active",
+    joinedAt: "2026-08-02T09:00:00.000Z",
+    isSelf: false,
+  };
+
+  function rowFor(email: string) {
+    return within(screen.getByRole("row", { name: new RegExp(email) }));
+  }
+
+  it("hides the actions column from an analyst", async () => {
+    renderPage({ memberService: memberService({ list: async () => [analyst] }), role: "analyst" });
+
+    await screen.findByText("analyst@example.com");
+    expect(screen.queryByRole("columnheader", { name: /actions/i })).not.toBeInTheDocument();
+  });
+
+  it("activates a pending member and announces it", async () => {
+    const service = memberService();
+    renderPage({ memberService: service, role: "manager" });
+
+    await screen.findByRole("table", { name: /workspace members/i });
+    await userEvent.click(rowFor("analyst@example.com").getByRole("button", { name: /activate/i }));
+
+    expect(service.activate).toHaveBeenCalledWith(analyst.userId);
+    expect(await screen.findByRole("status")).toHaveTextContent(/activated/i);
+  });
+
+  it("promotes an active analyst to manager", async () => {
+    const service = memberService({
+      list: async () => [{ ...analyst, status: "active" as const }, manager],
+    });
+    renderPage({ memberService: service, role: "manager" });
+
+    await screen.findByRole("table", { name: /workspace members/i });
+    await userEvent.click(rowFor("analyst@example.com").getByRole("button", { name: /make manager/i }));
+
+    expect(service.setRole).toHaveBeenCalledWith(analyst.userId, "manager");
+  });
+
+  it("disables demotion when only one active manager remains", async () => {
+    renderPage({ memberService: memberService(), role: "manager" });
+
+    await screen.findByRole("table", { name: /workspace members/i });
+    expect(rowFor("manager@example.com").getByRole("button", { name: /make analyst/i })).toBeDisabled();
+  });
+
+  it("enables demotion once a second manager exists", async () => {
+    const service = memberService({ list: async () => [manager, secondManager] });
+    renderPage({ memberService: service, role: "manager" });
+
+    await screen.findByRole("table", { name: /workspace members/i });
+    expect(rowFor("manager@example.com").getByRole("button", { name: /make analyst/i })).toBeEnabled();
+  });
+
+  it("requires a confirm step before rejecting an invitation", async () => {
+    const service = memberService();
+    renderPage({ memberService: service, role: "manager" });
+
+    await screen.findByRole("table", { name: /workspace members/i });
+    await userEvent.click(rowFor("analyst@example.com").getByRole("button", { name: /^reject$/i }));
+
+    expect(service.rejectInvitation).not.toHaveBeenCalled();
+    await userEvent.click(rowFor("analyst@example.com").getByRole("button", { name: /confirm reject/i }));
+    expect(service.rejectInvitation).toHaveBeenCalledWith(analyst.userId);
+  });
+
+  it("abandons the reject confirmation on cancel", async () => {
+    const service = memberService();
+    renderPage({ memberService: service, role: "manager" });
+
+    await screen.findByRole("table", { name: /workspace members/i });
+    await userEvent.click(rowFor("analyst@example.com").getByRole("button", { name: /^reject$/i }));
+    await userEvent.click(rowFor("analyst@example.com").getByRole("button", { name: /cancel/i }));
+
+    expect(rowFor("analyst@example.com").getByRole("button", { name: /^reject$/i })).toBeInTheDocument();
+    expect(service.rejectInvitation).not.toHaveBeenCalled();
+  });
+
+  it("reports a refused action in the alert region", async () => {
+    const service = memberService({
+      activate: async () => {
+        throw new Error("Member not found. Reload the roster and try again.");
+      },
+    });
+    renderPage({ memberService: service, role: "manager" });
+
+    await screen.findByRole("table", { name: /workspace members/i });
+    await userEvent.click(rowFor("analyst@example.com").getByRole("button", { name: /activate/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/reload the roster/i);
   });
 });
