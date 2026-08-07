@@ -1,0 +1,15 @@
+node_modules/
+dist/
+playwright-report/
+test-results/
+playwright/.auth/
+.superpowers/
+.env
+.env.*
+!.env.example
+
+# Agent and tool scratch
+session-*.md
+.playwright-mcp/
+supabase/.temp/
+.claude/settings.local.json

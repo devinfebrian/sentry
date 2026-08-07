@@ -1,0 +1,177 @@
+import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
+import { describe, expect, it, vi } from "vitest";
+import type { SentinelMember } from "../domain/types";
+import { WorkspacePage } from "./WorkspacePage";
+
+const manager: SentinelMember = {
+  userId: "22222222-2222-4222-8222-222222222222",
+  email: "manager@example.com",
+  role: "manager",
+  status: "active",
+  joinedAt: "2026-08-01T09:00:00.000Z",
+  isSelf: true,
+};
+
+const analyst: SentinelMember = {
+  userId: "33333333-3333-4333-8333-333333333333",
+  email: "analyst@example.com",
+  role: "analyst",
+  status: "pending",
+  joinedAt: "2026-08-04T09:00:00.000Z",
+  isSelf: false,
+};
+
+function memberService(overrides: Partial<{ list: () => Promise<SentinelMember[]>; invite: (email: string) => Promise<void> }> = {}) {
+  return {
+    list: vi.fn(overrides.list ?? (async () => [manager, analyst])),
+    invite: vi.fn(overrides.invite ?? (async () => undefined)),
+  };
+}
+
+function renderPage(props: Parameters<typeof WorkspacePage>[0]) {
+  return render(<MemoryRouter><WorkspacePage {...props} /></MemoryRouter>);
+}
+
+describe("WorkspacePage", () => {
+  it("shows the member roster and invite form to a manager", async () => {
+    renderPage({ memberService: memberService(), role: "manager" });
+
+    expect(await screen.findByRole("table", { name: /workspace members/i })).toBeInTheDocument();
+    expect(screen.getByText("manager@example.com")).toBeInTheDocument();
+    expect(screen.getByText("analyst@example.com")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: /email/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /send invitation/i })).toBeInTheDocument();
+  });
+
+  it("hides invite controls from an analyst", async () => {
+    renderPage({ memberService: memberService({ list: async () => [analyst] }), role: "analyst" });
+
+    expect(await screen.findByText("analyst@example.com")).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: /email/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /send invitation/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/only workspace managers can invite/i)).toBeInTheDocument();
+  });
+
+  it("rejects an invalid email without calling the service", async () => {
+    const service = memberService();
+    renderPage({ memberService: service, role: "manager" });
+
+    await screen.findByRole("table", { name: /workspace members/i });
+    await userEvent.type(screen.getByRole("textbox", { name: /email/i }), "not-an-email");
+    await userEvent.click(screen.getByRole("button", { name: /send invitation/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/enter a valid email address/i);
+    expect(service.invite).not.toHaveBeenCalled();
+  });
+
+  it("announces success, clears the field, and reloads the roster", async () => {
+    const service = memberService();
+    renderPage({ memberService: service, role: "manager" });
+
+    await screen.findByRole("table", { name: /workspace members/i });
+    const email = screen.getByRole("textbox", { name: /email/i });
+    await userEvent.type(email, "new.analyst@example.com");
+    await userEvent.click(screen.getByRole("button", { name: /send invitation/i }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent(/new\.analyst@example\.com/i);
+    expect(service.invite).toHaveBeenCalledWith("new.analyst@example.com");
+    expect(email).toHaveValue("");
+    expect(service.list).toHaveBeenCalledTimes(2);
+  });
+
+  it("surfaces a failed invitation and keeps the typed email", async () => {
+    const service = memberService({
+      invite: async () => {
+        throw new Error("Invitation already pending.");
+      },
+    });
+    renderPage({ memberService: service, role: "manager" });
+
+    await screen.findByRole("table", { name: /workspace members/i });
+    const email = screen.getByRole("textbox", { name: /email/i });
+    await userEvent.type(email, "analyst@example.com");
+    await userEvent.click(screen.getByRole("button", { name: /send invitation/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/invitation already pending/i);
+    expect(email).toHaveValue("analyst@example.com");
+    expect(service.list).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not report a failed invitation when only the roster refresh fails", async () => {
+    const service = {
+      list: vi.fn<() => Promise<SentinelMember[]>>()
+        .mockResolvedValueOnce([manager])
+        .mockRejectedValueOnce(new Error("network unavailable")),
+      invite: vi.fn(async () => undefined),
+    };
+    renderPage({ memberService: service, role: "manager" });
+
+    await screen.findByRole("table", { name: /workspace members/i });
+    await userEvent.type(screen.getByRole("textbox", { name: /email/i }), "new.analyst@example.com");
+    await userEvent.click(screen.getByRole("button", { name: /send invitation/i }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent(/invitation sent to new\.analyst@example\.com/i);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("shows a loading state while members load", () => {
+    renderPage({ memberService: memberService({ list: () => new Promise<SentinelMember[]>(() => undefined) }), role: "manager" });
+
+    expect(screen.getByRole("status", { name: /loading workspace members/i })).toBeInTheDocument();
+  });
+
+  it("retries member loading after an error", async () => {
+    const service = {
+      list: vi.fn<() => Promise<SentinelMember[]>>()
+        .mockRejectedValueOnce(new Error("network unavailable"))
+        .mockResolvedValueOnce([manager]),
+      invite: vi.fn(async () => undefined),
+    };
+    renderPage({ memberService: service, role: "manager" });
+
+    expect(await screen.findByRole("heading", { name: /members unavailable/i })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /retry/i }));
+    expect(await screen.findByRole("table", { name: /workspace members/i })).toBeInTheDocument();
+  });
+
+  it("reports an unavailable service instead of loading forever", async () => {
+    renderPage({ memberService: null, role: "manager" });
+
+    expect(await screen.findByRole("heading", { name: /members unavailable/i })).toBeInTheDocument();
+    // No service to call, so the invite form must not render as a dead control.
+    expect(screen.queryByRole("button", { name: /send invitation/i })).not.toBeInTheDocument();
+  });
+
+  it("withholds invite controls until the directory finishes loading", () => {
+    renderPage({ memberService: memberService({ list: () => new Promise<SentinelMember[]>(() => undefined) }), role: "manager" });
+
+    expect(screen.queryByRole("button", { name: /send invitation/i })).not.toBeInTheDocument();
+  });
+
+  it("ignores a stale list response after the service changes", async () => {
+    let resolveStale!: (members: SentinelMember[]) => void;
+    const staleService = {
+      list: vi.fn(() => new Promise<SentinelMember[]>((resolve) => { resolveStale = resolve; })),
+      invite: vi.fn(async () => undefined),
+    };
+    const currentService = memberService({ list: async () => [manager] });
+    const { rerender } = render(<MemoryRouter><WorkspacePage memberService={staleService} role="manager" /></MemoryRouter>);
+
+    rerender(<MemoryRouter><WorkspacePage memberService={currentService} role="manager" /></MemoryRouter>);
+    expect(await screen.findByText("manager@example.com")).toBeInTheDocument();
+
+    resolveStale([{ ...analyst, email: "stale@example.com" }]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.queryByText("stale@example.com")).not.toBeInTheDocument();
+  });
+
+  it("falls back to the user id when a member has no invited email", async () => {
+    const seeded: SentinelMember = { ...manager, email: null };
+    renderPage({ memberService: memberService({ list: async () => [seeded] }), role: "manager" });
+
+    const table = await screen.findByRole("table", { name: /workspace members/i });
+    expect(within(table).getByText(seeded.userId)).toBeInTheDocument();
+  });
+});

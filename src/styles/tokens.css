@@ -1,0 +1,38 @@
+:root {
+  --color-paper: #f6f7f5;
+  --color-surface: #ffffff;
+  --color-ink: #17212b;
+  --color-slate: #607080;
+  --color-rule: #cbd3d8;
+  --color-action: #2457a6;
+  --color-risk: #b9433c;
+  --color-confirm: #2d765d;
+  --color-wash: #eef2f4;
+  --color-blue-wash: #edf3fc;
+  --color-red-wash: #fbeeee;
+  --color-green-wash: #edf7f2;
+  --font-ui: "IBM Plex Sans", sans-serif;
+  --font-numeric: "IBM Plex Mono", monospace;
+  --text-display: 700 36px/40px var(--font-ui);
+  --text-section: 700 24px/28px var(--font-ui);
+  --text-card: 700 18px/24px var(--font-ui);
+  --text-body-large: 400 16px/24px var(--font-ui);
+  --text-body: 400 14px/21px var(--font-ui);
+  --text-label: 500 13px/18px var(--font-ui);
+  --text-caption: 500 12px/16px var(--font-ui);
+  --text-metric: 500 28px/32px var(--font-numeric);
+  --text-number: 400 14px/20px var(--font-numeric);
+  --space-page: 32px;
+  --space-grid: 24px;
+  --control-height: 44px;
+  --rail-width: 216px;
+  --header-height: 64px;
+  --focus-ring: 0 0 0 2px var(--color-paper), 0 0 0 4px var(--color-action);
+}
+
+@media (max-width: 720px) {
+  :root {
+    --space-page: 20px;
+    --space-grid: 16px;
+  }
+}
