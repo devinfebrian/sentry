@@ -275,4 +275,41 @@ describe("createSentinelMemberService", () => {
       await expect(service.activate(analystId)).rejects.toThrow("Unable to activate member: connection failure");
     });
   });
+
+  describe("setRole", () => {
+    it("calls the role RPC with the target role", async () => {
+      const { client, rpc } = createClient();
+      const service = createSentinelMemberService(client, { workspaceId, userId: managerId, role: "manager" });
+
+      await service.setRole(analystId, "manager");
+
+      expect(rpc).toHaveBeenCalledWith("sentinel_set_member_role", {
+        p_workspace_id: workspaceId,
+        p_user_id: analystId,
+        p_role: "manager",
+      });
+    });
+
+    it("surfaces the last-manager guard message verbatim", async () => {
+      const { client } = createClient({
+        rpcResult: { data: null, error: { code: "P0001", message: "Workspace must keep at least one manager." } },
+      });
+      const service = createSentinelMemberService(client, { workspaceId, userId: managerId, role: "manager" });
+
+      await expect(service.setRole(managerId, "analyst")).rejects.toThrow(
+        "Workspace must keep at least one manager.",
+      );
+    });
+
+    it("wraps an unrecognised failure with the operation name", async () => {
+      const { client } = createClient({
+        rpcResult: { data: null, error: { code: "08006", message: "connection failure" } },
+      });
+      const service = createSentinelMemberService(client, { workspaceId, userId: managerId, role: "manager" });
+
+      await expect(service.setRole(analystId, "manager")).rejects.toThrow(
+        "Unable to change member role: connection failure",
+      );
+    });
+  });
 });

@@ -146,5 +146,15 @@ export function createSentinelMemberService(
 
       if (error) throw mapRpcError("activate member", error);
     },
+
+    async setRole(userId, role) {
+      const { error } = await client.rpc("sentinel_set_member_role", {
+        p_workspace_id: context.workspaceId,
+        p_user_id: userId,
+        p_role: role,
+      });
+
+      if (error) throw mapRpcError("change member role", error);
+    },
   };
 }
