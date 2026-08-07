@@ -34,11 +34,11 @@ as $function$
 declare
   target public.sentinel_members%rowtype;
 begin
+  perform pg_advisory_xact_lock(hashtext('sentinel_members:' || p_workspace_id::text));
+
   if not private.sentinel_is_manager(p_workspace_id) then
     raise exception using errcode = '42501', message = 'Manager membership required.';
   end if;
-
-  perform pg_advisory_xact_lock(hashtext('sentinel_members:' || p_workspace_id::text));
 
   select member.* into target
   from public.sentinel_members as member
@@ -95,6 +95,8 @@ declare
   target public.sentinel_members%rowtype;
   manager_count integer;
 begin
+  perform pg_advisory_xact_lock(hashtext('sentinel_members:' || p_workspace_id::text));
+
   if not private.sentinel_is_manager(p_workspace_id) then
     raise exception using errcode = '42501', message = 'Manager membership required.';
   end if;
@@ -102,8 +104,6 @@ begin
   if p_role not in ('analyst', 'manager') then
     raise exception using errcode = 'P0001', message = 'Role must be analyst or manager.';
   end if;
-
-  perform pg_advisory_xact_lock(hashtext('sentinel_members:' || p_workspace_id::text));
 
   select member.* into target
   from public.sentinel_members as member
@@ -176,11 +176,11 @@ as $function$
 declare
   target public.sentinel_members%rowtype;
 begin
+  perform pg_advisory_xact_lock(hashtext('sentinel_members:' || p_workspace_id::text));
+
   if not private.sentinel_is_manager(p_workspace_id) then
     raise exception using errcode = '42501', message = 'Manager membership required.';
   end if;
-
-  perform pg_advisory_xact_lock(hashtext('sentinel_members:' || p_workspace_id::text));
 
   select member.* into target
   from public.sentinel_members as member
@@ -230,3 +230,10 @@ revoke execute on function public.sentinel_reject_invitation(uuid, uuid) from pu
 grant execute on function public.sentinel_activate_member(uuid, uuid) to authenticated, service_role;
 grant execute on function public.sentinel_set_member_role(uuid, uuid, text) to authenticated, service_role;
 grant execute on function public.sentinel_reject_invitation(uuid, uuid) to authenticated, service_role;
+
+-- Direct table UPDATE on role/status let any manager bypass the RPCs above
+-- (advisory lock, last-manager guard, and audit event) entirely, e.g. via
+-- PATCH /rest/v1/sentinel_members. The three RPCs are now the only mutation path.
+revoke update (role, status) on table public.sentinel_members from authenticated;
+
+drop policy if exists "sentinel memberships are manageable by managers" on public.sentinel_members;

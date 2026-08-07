@@ -65,6 +65,20 @@ begin
     end if;
   end loop;
 
+  if has_column_privilege('authenticated', 'public.sentinel_members', 'role', 'UPDATE')
+    or has_column_privilege('authenticated', 'public.sentinel_members', 'status', 'UPDATE') then
+    raise exception 'authenticated must not hold direct UPDATE on sentinel_members role/status';
+  end if;
+
+  if exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'sentinel_members'
+      and policyname = 'sentinel memberships are manageable by managers'
+  ) then
+    raise exception 'Obsolete direct-update membership policy still exists';
+  end if;
+
   raise notice 'sentinel member management verified';
 end;
 $$;
