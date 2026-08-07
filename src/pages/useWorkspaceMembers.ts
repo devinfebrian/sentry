@@ -59,18 +59,39 @@ export function useWorkspaceMembers(memberService?: RosterService | null) {
   const retry = useCallback(() => setRetryKey((current) => current + 1), []);
 
   /**
-   * Runs a mutation then refetches. The refetch only runs after the action itself
-   * succeeds: a failed action never touched the roster, so there is nothing new to
-   * reload, and the action's own failure message is what the caller needs to hear.
+   * Runs a mutation then refetches. On success the refetch always runs: the action
+   * changed the roster, so the view is now stale. On failure the refetch is
+   * opt-in via `refreshOnFailure` — some failures (invite: bad address, already
+   * pending) mean the roster genuinely did not change, so refetching would be a
+   * wasted round trip; others (row actions: member no longer found, another
+   * manager was just demoted, an invitation was already accepted) mean the
+   * roster view is stale precisely because of what the failure describes, so a
+   * best-effort refetch corrects it. Either way, the action's own outcome is
+   * always what the caller reports — the refetch only ever updates `state`, never
+   * the returned message.
    */
-  const mutate = useCallback(async (action: () => Promise<void>, successMessage: string): Promise<MutationResult> => {
+  const mutate = useCallback(async (
+    action: () => Promise<void>,
+    successMessage: string,
+    options?: { refreshOnFailure?: boolean },
+  ): Promise<MutationResult> => {
     if (!memberService) return { ok: false, message: UNAVAILABLE_ERROR };
 
     const requestId = requestIdRef.current;
     try {
       await action();
     } catch (caught) {
-      return { ok: false, message: caught instanceof Error ? caught.message : "Unable to update member." };
+      const message = caught instanceof Error ? caught.message : "Unable to update member.";
+      if (options?.refreshOnFailure) {
+        try {
+          const members = await memberService.list();
+          if (requestIdRef.current === requestId) setState({ status: "ready", members: sortMembers(members) });
+        } catch {
+          // The action's own failure is what the caller needs to hear; a refetch
+          // failure on top of it must not mask or replace that message.
+        }
+      }
+      return { ok: false, message };
     }
 
     try {

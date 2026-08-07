@@ -91,4 +91,52 @@ describe("useWorkspaceMembers", () => {
     expect(outcome).toEqual({ ok: false, message: "Workspace must keep at least one manager." });
     expect(memberService.list).not.toHaveBeenCalled();
   });
+
+  it("refreshes the roster after a failed mutation when refreshOnFailure is set", async () => {
+    const memberService = service([activeManager]);
+    const { result } = renderHook(() => useWorkspaceMembers(memberService));
+    await waitFor(() => expect(result.current.state.status).toBe("ready"));
+    memberService.list.mockClear();
+    memberService.list.mockResolvedValueOnce([activeManager, pendingAnalyst]);
+
+    let outcome: { ok: boolean; message: string } | undefined;
+    await act(async () => {
+      outcome = await result.current.mutate(
+        async () => {
+          throw new Error("Workspace must keep at least one manager.");
+        },
+        "Role changed.",
+        { refreshOnFailure: true },
+      );
+    });
+
+    expect(memberService.list).toHaveBeenCalledTimes(1);
+    expect(outcome).toEqual({ ok: false, message: "Workspace must keep at least one manager." });
+    expect(result.current.members.map((member) => member.userId)).toEqual([
+      pendingAnalyst.userId,
+      activeManager.userId,
+    ]);
+  });
+
+  it("still reports the action's failure when refreshOnFailure is set and the refetch also fails", async () => {
+    const memberService = service([activeManager]);
+    const { result } = renderHook(() => useWorkspaceMembers(memberService));
+    await waitFor(() => expect(result.current.state.status).toBe("ready"));
+    memberService.list.mockClear();
+    memberService.list.mockRejectedValueOnce(new Error("network down"));
+
+    let outcome: { ok: boolean; message: string } | undefined;
+    await act(async () => {
+      outcome = await result.current.mutate(
+        async () => {
+          throw new Error("Workspace must keep at least one manager.");
+        },
+        "Role changed.",
+        { refreshOnFailure: true },
+      );
+    });
+
+    expect(memberService.list).toHaveBeenCalledTimes(1);
+    expect(outcome).toEqual({ ok: false, message: "Workspace must keep at least one manager." });
+  });
 });
