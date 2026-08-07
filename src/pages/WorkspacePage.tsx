@@ -40,7 +40,7 @@ export function WorkspacePage({ memberService, role }: WorkspacePageProps) {
   const actions = isManager && memberService ? memberService : null;
 
   const runAction = async (userId: string, action: () => Promise<void>, successMessage: string) => {
-    if (busyUserId) return;
+    if (busyUserId || inviting) return;
 
     setInviteError("");
     setInviteNotice("");
@@ -146,7 +146,7 @@ export function WorkspacePage({ memberService, role }: WorkspacePageProps) {
                             <Button
                               variant="secondary"
                               type="button"
-                              disabled={busyUserId !== null}
+                              disabled={busyUserId === member.userId}
                               onClick={() => void runAction(
                                 member.userId,
                                 () => actions.activate(member.userId),
@@ -160,7 +160,7 @@ export function WorkspacePage({ memberService, role }: WorkspacePageProps) {
                                 <Button
                                   variant="destructive"
                                   type="button"
-                                  disabled={busyUserId !== null}
+                                  disabled={busyUserId === member.userId}
                                   onClick={() => void runAction(
                                     member.userId,
                                     () => actions.rejectInvitation(member.userId),
@@ -169,13 +169,20 @@ export function WorkspacePage({ memberService, role }: WorkspacePageProps) {
                                 >
                                   Confirm reject
                                 </Button>
-                                <Button variant="quiet" type="button" onClick={() => setConfirmingRejectId(null)}>Cancel</Button>
+                                <Button
+                                  variant="quiet"
+                                  type="button"
+                                  disabled={busyUserId === member.userId}
+                                  onClick={() => setConfirmingRejectId(null)}
+                                >
+                                  Cancel
+                                </Button>
                               </>
                             ) : (
                               <Button
                                 variant="quiet"
                                 type="button"
-                                disabled={busyUserId !== null}
+                                disabled={busyUserId === member.userId}
                                 onClick={() => setConfirmingRejectId(member.userId)}
                               >
                                 Reject
@@ -186,7 +193,7 @@ export function WorkspacePage({ memberService, role }: WorkspacePageProps) {
                           <Button
                             variant="secondary"
                             type="button"
-                            disabled={busyUserId !== null}
+                            disabled={busyUserId === member.userId}
                             onClick={() => void runAction(
                               member.userId,
                               () => actions.setRole(member.userId, "manager"),
@@ -200,7 +207,7 @@ export function WorkspacePage({ memberService, role }: WorkspacePageProps) {
                             <Button
                               variant="secondary"
                               type="button"
-                              disabled={busyUserId !== null || activeManagerCount <= 1}
+                              disabled={busyUserId === member.userId || activeManagerCount <= 1}
                               onClick={() => void runAction(
                                 member.userId,
                                 () => actions.setRole(member.userId, "analyst"),
@@ -245,10 +252,10 @@ export function WorkspacePage({ memberService, role }: WorkspacePageProps) {
               type="email"
               autoComplete="off"
               value={email}
-              disabled={inviting}
+              disabled={inviting || busyUserId !== null}
               onChange={(event) => setEmail(event.target.value)}
             />
-            <Button variant="primary" type="submit" disabled={inviting}>Send invitation</Button>
+            <Button variant="primary" type="submit" disabled={inviting || busyUserId !== null}>Send invitation</Button>
           </form>
           {inviteError && <div className="import-error" role="alert">{inviteError}</div>}
           {inviteNotice && <div className="workspace-invite-notice" role="status" aria-live="polite">{inviteNotice}</div>}

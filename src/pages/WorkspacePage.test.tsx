@@ -292,4 +292,77 @@ describe("member actions", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/reload the roster/i);
   });
+
+  function deferred<T>() {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((res) => {
+      resolve = res;
+    });
+    return { promise, resolve };
+  }
+
+  it("keeps a second row's buttons enabled while another row's action is in flight", async () => {
+    const gate = deferred<void>();
+    const service = memberService({
+      list: async () => [manager, secondManager, analyst],
+      activate: () => gate.promise,
+    });
+    renderPage({ memberService: service, role: "manager" });
+
+    await screen.findByRole("table", { name: /workspace members/i });
+    await userEvent.click(rowFor("analyst@example.com").getByRole("button", { name: /activate/i }));
+
+    expect(rowFor("analyst@example.com").getByRole("button", { name: /activate/i })).toBeDisabled();
+    expect(rowFor("second@example.com").getByRole("button", { name: /make analyst/i })).toBeEnabled();
+
+    gate.resolve();
+    await screen.findByRole("status");
+  });
+
+  it("disables the acted-on row's buttons, including Cancel, while a reject is in flight", async () => {
+    const gate = deferred<void>();
+    const service = memberService({ rejectInvitation: () => gate.promise });
+    renderPage({ memberService: service, role: "manager" });
+
+    await screen.findByRole("table", { name: /workspace members/i });
+    await userEvent.click(rowFor("analyst@example.com").getByRole("button", { name: /^reject$/i }));
+    await userEvent.click(rowFor("analyst@example.com").getByRole("button", { name: /confirm reject/i }));
+
+    expect(rowFor("analyst@example.com").getByRole("button", { name: /confirm reject/i })).toBeDisabled();
+    expect(rowFor("analyst@example.com").getByRole("button", { name: /cancel/i })).toBeDisabled();
+
+    gate.resolve();
+    await screen.findByRole("status");
+  });
+
+  it("refetches the roster after a row action fails, so a stale row can be corrected", async () => {
+    const service = memberService({
+      activate: async () => {
+        throw new Error("Member not found. Reload the roster and try again.");
+      },
+    });
+    renderPage({ memberService: service, role: "manager" });
+
+    await screen.findByRole("table", { name: /workspace members/i });
+    expect(service.list).toHaveBeenCalledTimes(1);
+
+    await userEvent.click(rowFor("analyst@example.com").getByRole("button", { name: /activate/i }));
+    await screen.findByRole("alert");
+
+    expect(service.list).toHaveBeenCalledTimes(2);
+  });
+
+  it("disables Send invitation while a row action is in flight", async () => {
+    const gate = deferred<void>();
+    const service = memberService({ activate: () => gate.promise });
+    renderPage({ memberService: service, role: "manager" });
+
+    await screen.findByRole("table", { name: /workspace members/i });
+    await userEvent.click(rowFor("analyst@example.com").getByRole("button", { name: /activate/i }));
+
+    expect(screen.getByRole("button", { name: /send invitation/i })).toBeDisabled();
+
+    gate.resolve();
+    await screen.findByRole("status");
+  });
 });
