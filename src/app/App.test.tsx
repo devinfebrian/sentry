@@ -168,7 +168,12 @@ describe("App", () => {
 
     renderAuthenticatedApp();
 
-    expect(createInvestigationServiceMock).toHaveBeenCalledWith(fakeSupabase, { workspaceId: "test-workspace", userId: "test-user" });
+    // objectContaining: the context also carries a loadOwnerNames lookup, which exists so
+    // owners render as names rather than UUIDs.
+    expect(createInvestigationServiceMock).toHaveBeenCalledWith(
+      fakeSupabase,
+      expect.objectContaining({ workspaceId: "test-workspace", userId: "test-user" }),
+    );
     expect(createUploadServiceMock).toHaveBeenCalledWith(fakeSupabase, { workspaceId: "test-workspace", userId: "test-user" });
 
     await user.click(screen.getByRole("button", { name: /import data/i }));

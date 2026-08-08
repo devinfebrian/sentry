@@ -4,6 +4,7 @@ import { EmptyState } from "../components/ui/EmptyState";
 import { ErrorState } from "../components/ui/ErrorState";
 import { LoadingState } from "../components/ui/LoadingState";
 import { StatusBadge } from "../components/ui/StatusBadge";
+import { formatDate } from "../lib/datetime";
 import { INVALID_EMAIL_ERROR, normalizeMemberEmail } from "../services/sentinelMembers";
 import type { SentinelMember, SentinelMemberRole, SentinelMemberService } from "../domain/types";
 import { useWorkspaceMembers } from "./useWorkspaceMembers";
@@ -18,11 +19,6 @@ const statusLabels: Record<SentinelMember["status"], string> = { active: "Active
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Try again to reload workspace members.";
-}
-
-function joinedLabel(joinedAt: string) {
-  const parsed = Date.parse(joinedAt);
-  return Number.isFinite(parsed) ? new Date(parsed).toISOString().slice(0, 10) : "Unknown";
 }
 
 export function WorkspacePage({ memberService, role }: WorkspacePageProps) {
@@ -138,7 +134,7 @@ export function WorkspacePage({ memberService, role }: WorkspacePageProps) {
                         tone={member.status === "active" ? "confirm" : "warning"}
                       />
                     </td>
-                    <td className="numeric">{joinedLabel(member.joinedAt)}</td>
+                    <td className="numeric">{formatDate(member.joinedAt)}</td>
                     {actions && (
                       <td className="member-actions">
                         {member.status === "pending" ? (

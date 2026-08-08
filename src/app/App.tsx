@@ -42,9 +42,6 @@ function WorkspaceLayout() {
   const investigationClient = supabase ? supabase as unknown as SentinelInvestigationClient : null;
   const uploadClient = supabase ? supabase as unknown as SentinelUploadClient : null;
   const memberClient = supabase ? supabase as unknown as SentinelMemberClient : null;
-  const investigationService = useMemo(() => investigationClient && serviceContext
-    ? createSentinelInvestigationService(investigationClient, serviceContext)
-    : null, [investigationClient, user?.id, workspaceId]);
   const uploadService = useMemo(() => uploadClient && serviceContext
     ? createSentinelUploadService(uploadClient, serviceContext)
     : null, [uploadClient, user?.id, workspaceId]);
@@ -52,6 +49,21 @@ function WorkspaceLayout() {
   const memberService = useMemo(() => memberClient && serviceContext
     ? createSentinelMemberService(memberClient, { ...serviceContext, role })
     : null, [memberClient, user?.id, workspaceId, role]);
+  // Investigations render owner names but cannot join to membership — owner_id references
+  // auth.users, so there is no relationship for PostgREST to embed. The roster is passed
+  // in as a lookup instead, keeping the two services independent.
+  const investigationService = useMemo(() => investigationClient && serviceContext
+    ? createSentinelInvestigationService(investigationClient, {
+      ...serviceContext,
+      loadOwnerNames: memberService
+        ? async () => new Map(
+          (await memberService.list())
+            .filter((member) => member.displayName)
+            .map((member) => [member.userId, member.displayName as string]),
+        )
+        : undefined,
+    })
+    : null, [investigationClient, user?.id, workspaceId, memberService]);
 
   const importWorkflow = useMemo(() => investigationService && uploadService && user?.id
     ? createImportWorkflow({ investigations: investigationService, uploads: uploadService, ownerId: user.id })

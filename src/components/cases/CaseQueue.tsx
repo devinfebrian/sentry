@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import { formatRelative } from "../../lib/datetime";
 import type { CaseSummary, RiskLevel } from "../../domain/types";
 import { StatusBadge } from "../ui/StatusBadge";
 
@@ -98,7 +99,7 @@ export function CaseQueue({ cases }: CaseQueueProps) {
                 <td>{stageLabels[item.stageId] ?? item.stageId}</td>
                 <td><StatusBadge status={item.risk} label={riskLabels[item.risk]} tone={riskTone(item.risk)} /></td>
                 <td className="numeric">{item.ageDays}d</td>
-                <td>{item.lastActivity}</td>
+                <td>{formatRelative(item.lastActivity)}</td>
               </tr>
             ))}
           </tbody>

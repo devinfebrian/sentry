@@ -53,7 +53,10 @@ export type SentinelMemberStatus = "active" | "pending";
 
 export interface SentinelMember {
   userId: string;
+  /** Manager-only: analysts have no column grant on invited_email. */
   email: string | null;
+  /** Readable by every active member, which is what makes owner names possible. */
+  displayName: string | null;
   role: SentinelMemberRole;
   status: SentinelMemberStatus;
   joinedAt: string;
@@ -66,6 +69,8 @@ export interface SentinelMemberService {
   activate(userId: string): Promise<void>;
   setRole(userId: string, role: SentinelMemberRole): Promise<void>;
   rejectInvitation(userId: string): Promise<void>;
+  /** Renames the caller only; the RPC ignores any other member. */
+  setDisplayName(displayName: string): Promise<void>;
 }
 
 export interface EvidenceRecord {

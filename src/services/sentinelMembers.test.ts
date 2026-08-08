@@ -69,7 +69,7 @@ describe("createSentinelMemberService", () => {
       await service.list();
 
       expect(from).toHaveBeenCalledWith("sentinel_manager_roster");
-      expect(select).toHaveBeenCalledWith("user_id, role, status, invited_email, created_at");
+      expect(select).toHaveBeenCalledWith("user_id, role, status, invited_email, display_name, created_at");
     });
 
     it("reads sentinel_members without invited_email for an analyst", async () => {
@@ -81,7 +81,7 @@ describe("createSentinelMemberService", () => {
       await service.list();
 
       expect(from).toHaveBeenCalledWith("sentinel_members");
-      expect(select).toHaveBeenCalledWith("user_id, role, status, created_at");
+      expect(select).toHaveBeenCalledWith("user_id, role, status, display_name, created_at");
       expect(select).not.toHaveBeenCalledWith(expect.stringContaining("invited_email"));
     });
 
@@ -102,6 +102,7 @@ describe("createSentinelMemberService", () => {
         {
           userId: managerId,
           email: null,
+          displayName: null,
           role: "manager",
           status: "active",
           joinedAt: "2026-08-01T09:00:00.000Z",
@@ -110,6 +111,7 @@ describe("createSentinelMemberService", () => {
         {
           userId: analystId,
           email: "analyst@example.com",
+          displayName: null,
           role: "analyst",
           status: "pending",
           joinedAt: "2026-08-04T09:00:00.000Z",

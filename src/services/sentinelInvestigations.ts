@@ -4,7 +4,16 @@ import type { Database } from "../lib/database.types";
 
 type InvestigationRow = Database["public"]["Tables"]["sentinel_investigations"]["Row"];
 type InvestigationInsert = Database["public"]["Tables"]["sentinel_investigations"]["Insert"];
-type InvestigationContext = { workspaceId: string; userId: string };
+type InvestigationContext = {
+  workspaceId: string;
+  userId: string;
+  /**
+   * Supplies owner display names. A function rather than a service reference, so this
+   * module stays unaware of how membership is loaded. Best effort — a failed lookup
+   * degrades owner labels, it does not fail the case list.
+   */
+  loadOwnerNames?: () => Promise<OwnerNames>;
+};
 
 type InvestigationReadQuery = {
   eq(column: "workspace_id" | "reference", value: string): InvestigationReadQuery;
@@ -37,7 +46,22 @@ function mapError(operation: string, error: { message?: string } | null) {
   return new Error(`Unable to ${operation}: ${message}`);
 }
 
-function mapRow(row: InvestigationRow): CaseSummary {
+/**
+ * owner_id references auth.users, not sentinel_members, so PostgREST has no relationship
+ * to embed through. Names arrive as a lookup the caller supplies from the roster it has
+ * already loaded, rather than a second query per investigation.
+ */
+export type OwnerNames = ReadonlyMap<string, string>;
+
+export function resolveOwner(ownerId: string | null, names?: OwnerNames) {
+  if (!ownerId) return "Unassigned";
+  const name = names?.get(ownerId);
+  if (name) return name;
+  // Better a recognisable fragment than a 36-character UUID in a table cell.
+  return `Member ${ownerId.slice(0, 8)}`;
+}
+
+function mapRow(row: InvestigationRow, names?: OwnerNames): CaseSummary {
   const createdAt = Date.parse(row.created_at);
   const ageDays = Number.isFinite(createdAt)
     ? Math.max(0, Math.floor((Date.now() - createdAt) / millisecondsPerDay))
@@ -47,7 +71,7 @@ function mapRow(row: InvestigationRow): CaseSummary {
     id: row.reference,
     databaseId: row.id,
     entity: row.entity,
-    owner: row.owner_id || "Unassigned",
+    owner: resolveOwner(row.owner_id, names),
     risk: "not-assessed",
     stageId: "not-started",
     status: row.status,
@@ -61,6 +85,16 @@ export function createSentinelInvestigationService(
   client: SentinelInvestigationClient,
   context: InvestigationContext,
 ): SentinelInvestigationService {
+  const ownerNames = async (): Promise<OwnerNames | undefined> => {
+    if (!context.loadOwnerNames) return undefined;
+    try {
+      return await context.loadOwnerNames();
+    } catch {
+      // Names are a nicety; the case list is not.
+      return undefined;
+    }
+  };
+
   return {
     async list() {
       const { data, error } = await client
@@ -70,7 +104,8 @@ export function createSentinelInvestigationService(
         .order("created_at", { ascending: false });
 
       if (error) throw mapError("list investigations", error);
-      return (data ?? []).map(mapRow);
+      const names = await ownerNames();
+      return (data ?? []).map((row) => mapRow(row, names));
     },
 
     async getById(id) {
@@ -82,7 +117,7 @@ export function createSentinelInvestigationService(
         .maybeSingle();
 
       if (error) throw mapError("load investigation", error);
-      return data ? mapRow(data) : null;
+      return data ? mapRow(data, await ownerNames()) : null;
     },
 
     async create({ entity, ownerId }) {

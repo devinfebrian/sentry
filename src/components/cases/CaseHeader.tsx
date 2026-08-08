@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { formatRelative } from "../../lib/datetime";
 import type { CaseSummary, RiskLevel } from "../../domain/types";
 import { StatusBadge } from "../ui/StatusBadge";
 import { Button } from "../ui/Button";
@@ -27,7 +28,7 @@ export function CaseHeader({ caseItem, currentStep }: CaseHeaderProps) {
           <Link className="back-link" to="/cases">&lt;- Back to cases</Link>
           <span className="eyebrow">Investigation / {caseItem.id}</span>
           <h1>{caseItem.entity}</h1>
-          <p>Case owner {caseItem.owner} / Last activity {caseItem.lastActivity}</p>
+          <p>Case owner {caseItem.owner} / Last activity {formatRelative(caseItem.lastActivity)}</p>
         </div>
         <div className="case-header-actions"><StatusBadge status={caseItem.risk} label={riskLabels[caseItem.risk]} tone={caseItem.risk === "high" ? "risk" : caseItem.risk === "low" ? "confirm" : caseItem.risk === "not-assessed" ? "neutral" : "warning"} /><Button variant="secondary">Assign case</Button></div>
       </header>

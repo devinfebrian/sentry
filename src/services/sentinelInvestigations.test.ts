@@ -124,7 +124,9 @@ describe("createSentinelInvestigationService", () => {
         id: row.reference,
         databaseId: row.id,
         entity: row.entity,
-        owner: row.owner_id,
+        // No name source supplied, so the owner degrades to a recognisable fragment
+        // rather than a full UUID.
+        owner: `Member ${row.owner_id}`,
         risk: "not-assessed",
         stageId: "not-started",
         status: row.status,
@@ -204,6 +206,44 @@ describe("createSentinelInvestigationService", () => {
 
     maybeSingle.mockResolvedValue(successResponse<InvestigationRow | null>({ ...row, owner_id: null }));
     await expect(service.getById(row.reference)).resolves.toMatchObject({ owner: "Unassigned" });
+  });
+
+  describe("owner names", () => {
+    it("renders a known owner by display name", async () => {
+      const { query } = fakeReadQuery(successResponse<InvestigationRow[]>([row]), successResponse<InvestigationRow | null>(null));
+      const { client } = fakeReadClient(query);
+      const service = createSentinelInvestigationService(client, {
+        ...context,
+        loadOwnerNames: async () => new Map([[row.owner_id as string, "ada.lovelace"]]),
+      });
+
+      await expect(service.list()).resolves.toMatchObject([{ owner: "ada.lovelace" }]);
+    });
+
+    it("falls back to a fragment for an owner the roster does not cover", async () => {
+      const { query } = fakeReadQuery(successResponse<InvestigationRow[]>([row]), successResponse<InvestigationRow | null>(null));
+      const { client } = fakeReadClient(query);
+      const service = createSentinelInvestigationService(client, {
+        ...context,
+        loadOwnerNames: async () => new Map([["someone-else", "grace.hopper"]]),
+      });
+
+      await expect(service.list()).resolves.toMatchObject([{ owner: `Member ${row.owner_id}` }]);
+    });
+
+    it("still lists cases when the name lookup fails", async () => {
+      // Owner labels are a nicety; losing them must not take the case queue down with them.
+      const { query } = fakeReadQuery(successResponse<InvestigationRow[]>([row]), successResponse<InvestigationRow | null>(null));
+      const { client } = fakeReadClient(query);
+      const service = createSentinelInvestigationService(client, {
+        ...context,
+        loadOwnerNames: async () => {
+          throw new Error("Unable to list members: denied");
+        },
+      });
+
+      await expect(service.list()).resolves.toMatchObject([{ owner: `Member ${row.owner_id}` }]);
+    });
   });
 
   it("adds operation context when Supabase returns an error", async () => {

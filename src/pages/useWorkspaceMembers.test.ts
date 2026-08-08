@@ -6,6 +6,7 @@ import { useWorkspaceMembers } from "./useWorkspaceMembers";
 const activeManager: SentinelMember = {
   userId: "22222222-2222-4222-8222-222222222222",
   email: "manager@example.com",
+  displayName: "manager",
   role: "manager",
   status: "active",
   joinedAt: "2026-08-01T09:00:00.000Z",
@@ -15,6 +16,7 @@ const activeManager: SentinelMember = {
 const pendingAnalyst: SentinelMember = {
   userId: "33333333-3333-4333-8333-333333333333",
   email: "analyst@example.com",
+  displayName: "analyst",
   role: "analyst",
   status: "pending",
   joinedAt: "2026-08-04T09:00:00.000Z",
