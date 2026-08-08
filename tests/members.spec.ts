@@ -357,6 +357,87 @@ test.describe("manager member management", () => {
   });
 });
 
+test.describe("workspace identity and activity", () => {
+  test.use({ storageState: storageStatePath("analyst") });
+
+  test("an analyst reads colleagues by display name but never their address", async ({ page }) => {
+    // The SELECT policy was widened so owner names are possible; the column grant is what
+    // keeps addresses out of reach. Both halves have to hold at once.
+    const token = await openWorkspace(page);
+
+    const names = await rest(token, "sentinel_members?select=user_id,role,display_name");
+    expect(names.status).toBe(200);
+    expect(names.body.length, "an analyst must see the whole roster, not just themselves").toBeGreaterThan(1);
+    expect(names.body.every((row: { display_name: string | null }) => row.display_name)).toBe(true);
+
+    const addresses = await rest(token, "sentinel_members?select=user_id,invited_email");
+    expect(addresses.status, "invited_email must stay ungranted").toBe(403);
+
+    const roster = await rest(token, "sentinel_manager_roster?select=invited_email");
+    expect(roster.body, "the manager roster must stay empty for an analyst").toEqual([]);
+  });
+
+  test("renaming yourself changes only your own row", async ({ page }) => {
+    const token = await openWorkspace(page);
+    const selfId = subjectOf(token);
+    const before = await rest(token, "sentinel_members?select=user_id,display_name");
+    const original = before.body.find((row: { user_id: string }) => row.user_id === selfId).display_name;
+    const others = before.body.filter((row: { user_id: string }) => row.user_id !== selfId);
+
+    const renamed = `analyst-${Date.now().toString(36)}`;
+    try {
+      const response = await callRpc(token, "sentinel_set_display_name", { p_display_name: renamed });
+      expect(response.status).toBe(200);
+
+      const after = await rest(token, "sentinel_members?select=user_id,display_name");
+      expect(after.body.find((row: { user_id: string }) => row.user_id === selfId).display_name).toBe(renamed);
+      // Everyone else must be untouched — the RPC takes no user id to aim elsewhere.
+      for (const other of others) {
+        const still = after.body.find((row: { user_id: string }) => row.user_id === other.user_id);
+        expect(still.display_name).toBe(other.display_name);
+      }
+    } finally {
+      await callRpc(token, "sentinel_set_display_name", { p_display_name: original });
+    }
+  });
+
+  test("creating an investigation records an event and moves last activity", async ({ page }) => {
+    // investigation-created was declared in the event_type CHECK from the start and never
+    // written by anything, so an investigation with no upload had no activity at all.
+    const token = await openWorkspace(page);
+    const workspaceId = await workspaceIdFor(token);
+    const selfId = subjectOf(token);
+    const reference = `INV-ACT${Date.now().toString(36).toUpperCase()}`;
+
+    const created = await rest(token, "sentinel_investigations", {
+      method: "POST",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify({
+        workspace_id: workspaceId,
+        reference,
+        entity: "Activity Trigger Co",
+        owner_id: selfId,
+        status: "open",
+        created_by: selfId,
+      }),
+    });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const investigation = created.body[0];
+
+    const events = await rest(
+      token,
+      `sentinel_activity_events?select=event_type&event_type=eq.investigation-created&investigation_id=eq.${investigation.id}`,
+    );
+    expect(events.body).toHaveLength(1);
+
+    const after = await rest(token, `sentinel_investigations?select=created_at,updated_at&id=eq.${investigation.id}`);
+    expect(
+      Date.parse(after.body[0].updated_at) >= Date.parse(after.body[0].created_at),
+      "the event trigger must carry updated_at forward",
+    ).toBe(true);
+  });
+});
+
 test.describe("analyst member management", () => {
   test.use({ storageState: storageStatePath("analyst") });
 

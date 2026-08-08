@@ -422,6 +422,7 @@ describe("invite-member idempotency", () => {
       role: "analyst",
       status: "pending",
       invited_email: "analyst@example.com",
+      display_name: "analyst",
     });
   });
 
@@ -483,6 +484,7 @@ describe("invite-member idempotency", () => {
       role: "analyst",
       status: "pending",
       invited_email: "analyst@example.com",
+      display_name: "analyst",
     });
   });
 
@@ -524,6 +526,7 @@ describe("invite-member idempotency", () => {
       role: "analyst",
       status: "pending",
       invited_email: "analyst@example.com",
+      display_name: "analyst",
     });
   });
 
@@ -627,6 +630,7 @@ describe("invite-member idempotency", () => {
       role: "analyst",
       status: "pending",
       invited_email: "analyst@example.com",
+      display_name: "analyst",
     };
     const admin = adminClient({ reservation, pending: pendingMembership, reservationInsertError: { code: "23505" } });
     const client = userClient();
@@ -691,6 +695,7 @@ describe("invite-member idempotency", () => {
       role: "analyst",
       status: "pending",
       invited_email: "analyst@example.com",
+      display_name: "analyst",
     };
     const admin = adminClient({
       pending: pendingMembership,
@@ -730,6 +735,7 @@ describe("invite-member idempotency", () => {
       role: "analyst",
       status: "pending",
       invited_email: "analyst@example.com",
+      display_name: "analyst",
     };
     const admin = adminClient({
       pending: pendingMembership,
@@ -767,6 +773,7 @@ describe("invite-member idempotency", () => {
       role: "analyst",
       status: "pending",
       invited_email: "analyst@example.com",
+      display_name: "analyst",
     };
     const events: unknown[] = [];
     const admin = adminClient();
@@ -911,6 +918,7 @@ describe("invite-member failure mapping", () => {
       role: "analyst",
       status: "pending",
       invited_email: "analyst@example.com",
+      display_name: "analyst",
     });
   });
 });
