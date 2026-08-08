@@ -41,6 +41,7 @@ const SETUP_HELP = [
   "  VITE_SUPABASE_URL, VITE_SUPABASE_PUBLISHABLE_KEY",
   "  SENTINEL_TEST_MANAGER_EMAIL, SENTINEL_TEST_MANAGER_PASSWORD",
   "  SENTINEL_TEST_ANALYST_EMAIL, SENTINEL_TEST_ANALYST_PASSWORD",
+  "  SUPABASE_SECRET_KEY (service role, used only to seed/clean up members.spec.ts fixtures)",
   "Both accounts need a confirmed auth user and an active sentinel_members row.",
 ].join("\n");
 
@@ -64,4 +65,19 @@ export function requireCredentials(role: TestRole) {
     supabaseUrl: process.env.VITE_SUPABASE_URL!.trim(),
     publishableKey: process.env.VITE_SUPABASE_PUBLISHABLE_KEY!.trim(),
   };
+}
+
+/**
+ * Service-role key for tests that must seed or clean up data no user-level session can
+ * touch (e.g. creating a pending member without sending a real invitation email). This
+ * name is intentionally unprefixed, like the rest of this file's credentials, so it never
+ * reaches the browser bundle via Vite's VITE_ prefix convention.
+ */
+export function requireServiceRoleKey() {
+  loadTestEnv();
+  const key = process.env.SUPABASE_SECRET_KEY?.trim();
+  if (!key) {
+    throw new Error(`Missing service-role credential: SUPABASE_SECRET_KEY\n\n${SETUP_HELP}`);
+  }
+  return key;
 }
