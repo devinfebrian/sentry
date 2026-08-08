@@ -146,7 +146,7 @@ export function WorkspacePage({ memberService, role }: WorkspacePageProps) {
                             <Button
                               variant="secondary"
                               type="button"
-                              disabled={busyUserId === member.userId}
+                              disabled={busyUserId === member.userId || inviting}
                               onClick={() => void runAction(
                                 member.userId,
                                 () => actions.activate(member.userId),
@@ -160,7 +160,7 @@ export function WorkspacePage({ memberService, role }: WorkspacePageProps) {
                                 <Button
                                   variant="destructive"
                                   type="button"
-                                  disabled={busyUserId === member.userId}
+                                  disabled={busyUserId === member.userId || inviting}
                                   onClick={() => void runAction(
                                     member.userId,
                                     () => actions.rejectInvitation(member.userId),
@@ -172,7 +172,7 @@ export function WorkspacePage({ memberService, role }: WorkspacePageProps) {
                                 <Button
                                   variant="quiet"
                                   type="button"
-                                  disabled={busyUserId === member.userId}
+                                  disabled={busyUserId === member.userId || inviting}
                                   onClick={() => setConfirmingRejectId(null)}
                                 >
                                   Cancel
@@ -182,7 +182,7 @@ export function WorkspacePage({ memberService, role }: WorkspacePageProps) {
                               <Button
                                 variant="quiet"
                                 type="button"
-                                disabled={busyUserId === member.userId}
+                                disabled={busyUserId === member.userId || inviting}
                                 onClick={() => setConfirmingRejectId(member.userId)}
                               >
                                 Reject
@@ -193,7 +193,7 @@ export function WorkspacePage({ memberService, role }: WorkspacePageProps) {
                           <Button
                             variant="secondary"
                             type="button"
-                            disabled={busyUserId === member.userId}
+                            disabled={busyUserId === member.userId || inviting}
                             onClick={() => void runAction(
                               member.userId,
                               () => actions.setRole(member.userId, "manager"),
@@ -207,7 +207,7 @@ export function WorkspacePage({ memberService, role }: WorkspacePageProps) {
                             <Button
                               variant="secondary"
                               type="button"
-                              disabled={busyUserId === member.userId || activeManagerCount <= 1}
+                              disabled={busyUserId === member.userId || inviting || member.isSelf || activeManagerCount <= 1}
                               onClick={() => void runAction(
                                 member.userId,
                                 () => actions.setRole(member.userId, "analyst"),
@@ -216,9 +216,11 @@ export function WorkspacePage({ memberService, role }: WorkspacePageProps) {
                             >
                               Make analyst
                             </Button>
-                            {activeManagerCount <= 1 && (
+                            {member.isSelf ? (
+                              <span className="member-action-hint">You cannot change your own role.</span>
+                            ) : activeManagerCount <= 1 ? (
                               <span className="member-action-hint">Workspace must keep at least one manager.</span>
-                            )}
+                            ) : null}
                           </>
                         )}
                       </td>

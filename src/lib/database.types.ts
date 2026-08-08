@@ -49,6 +49,9 @@ export type Database = {
           invited_email?: string | null;
           created_at?: string;
         };
+        // `role` and `status` are only writable by `service_role` and the member-management
+        // RPCs (sentinel_activate_member / sentinel_set_member_role / sentinel_reject_invitation).
+        // `authenticated` no longer holds direct UPDATE on either column.
         Update: {
           workspace_id?: string;
           user_id?: string;
@@ -281,7 +284,10 @@ export type Database = {
             | "parse-started"
             | "parse-completed"
             | "parse-failed"
-            | "member-invited";
+            | "member-invited"
+            | "member-activated"
+            | "member-role-changed"
+            | "member-invite-rejected";
           rationale: string | null;
           metadata: Json;
           created_at: string;
@@ -297,7 +303,10 @@ export type Database = {
             | "parse-started"
             | "parse-completed"
             | "parse-failed"
-            | "member-invited";
+            | "member-invited"
+            | "member-activated"
+            | "member-role-changed"
+            | "member-invite-rejected";
           rationale?: string | null;
           metadata?: Json;
           created_at?: string;
@@ -313,7 +322,10 @@ export type Database = {
             | "parse-started"
             | "parse-completed"
             | "parse-failed"
-            | "member-invited";
+            | "member-invited"
+            | "member-activated"
+            | "member-role-changed"
+            | "member-invite-rejected";
           rationale?: string | null;
           metadata?: Json;
           created_at?: string;

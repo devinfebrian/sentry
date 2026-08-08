@@ -247,12 +247,22 @@ describe("member actions", () => {
     expect(rowFor("manager@example.com").getByRole("button", { name: /make analyst/i })).toBeDisabled();
   });
 
-  it("enables demotion once a second manager exists", async () => {
+  it("enables demotion of a non-self manager once a second manager exists", async () => {
     const service = memberService({ list: async () => [manager, secondManager] });
     renderPage({ memberService: service, role: "manager" });
 
     await screen.findByRole("table", { name: /workspace members/i });
-    expect(rowFor("manager@example.com").getByRole("button", { name: /make analyst/i })).toBeEnabled();
+    expect(rowFor("second@example.com").getByRole("button", { name: /make analyst/i })).toBeEnabled();
+  });
+
+  it("disables a manager's own demotion even when a second active manager exists", async () => {
+    const service = memberService({ list: async () => [manager, secondManager] });
+    renderPage({ memberService: service, role: "manager" });
+
+    await screen.findByRole("table", { name: /workspace members/i });
+    expect(rowFor("manager@example.com").getByRole("button", { name: /make analyst/i })).toBeDisabled();
+    expect(rowFor("manager@example.com").getByText(/you cannot change your own role/i)).toBeInTheDocument();
+    expect(rowFor("second@example.com").getByRole("button", { name: /make analyst/i })).toBeEnabled();
   });
 
   it("requires a confirm step before rejecting an invitation", async () => {
@@ -361,6 +371,23 @@ describe("member actions", () => {
     await userEvent.click(rowFor("analyst@example.com").getByRole("button", { name: /activate/i }));
 
     expect(screen.getByRole("button", { name: /send invitation/i })).toBeDisabled();
+
+    gate.resolve();
+    await screen.findByRole("status");
+  });
+
+  it("disables row action buttons, including the reject confirm, while an invite is in flight", async () => {
+    const gate = deferred<void>();
+    const service = memberService({ invite: () => gate.promise });
+    renderPage({ memberService: service, role: "manager" });
+
+    await screen.findByRole("table", { name: /workspace members/i });
+    await userEvent.type(screen.getByRole("textbox", { name: /email/i }), "new.analyst@example.com");
+    await userEvent.click(screen.getByRole("button", { name: /send invitation/i }));
+
+    expect(rowFor("analyst@example.com").getByRole("button", { name: /activate/i })).toBeDisabled();
+    expect(rowFor("analyst@example.com").getByRole("button", { name: /^reject$/i })).toBeDisabled();
+    expect(service.rejectInvitation).not.toHaveBeenCalled();
 
     gate.resolve();
     await screen.findByRole("status");

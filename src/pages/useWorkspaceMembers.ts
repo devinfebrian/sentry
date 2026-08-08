@@ -20,7 +20,9 @@ const REFRESH_FAILED_SUFFIX = "The member list could not be refreshed — reload
 function sortMembers(members: SentinelMember[]) {
   return [...members].sort((left, right) => {
     if (left.status !== right.status) return left.status === "pending" ? -1 : 1;
-    return left.joinedAt.localeCompare(right.joinedAt);
+    if (left.joinedAt < right.joinedAt) return -1;
+    if (left.joinedAt > right.joinedAt) return 1;
+    return 0;
   });
 }
 
