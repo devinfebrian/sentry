@@ -42,12 +42,21 @@ const session = {
   user: sessionUser,
 } as never;
 
-function membershipQuery(role: "manager" | "analyst" = "analyst", status: "active" | "pending" = "active") {
+/**
+ * The provider reads ordered rows rather than maybeSingle(), so a user holding more than
+ * one workspace membership resolves instead of erroring. `rows` overrides the default
+ * single-row result for the multi-membership cases.
+ */
+function membershipQuery(
+  role: "manager" | "analyst" = "analyst",
+  status: "active" | "pending" = "active",
+  rows?: { role: string; workspace_id: string; status: string; created_at: string }[],
+) {
   const query = {
     select: vi.fn(),
     eq: vi.fn(),
-    maybeSingle: vi.fn().mockResolvedValue({
-      data: { role, workspace_id: "workspace-1", status },
+    order: vi.fn().mockResolvedValue({
+      data: rows ?? [{ role, workspace_id: "workspace-1", status, created_at: "2026-08-01T00:00:00.000Z" }],
       error: null,
     }),
   };
@@ -75,6 +84,7 @@ function AuthProbe() {
       <output data-testid="loading">{String(auth.loading)}</output>
       <output data-testid="configuration-error">{String(auth.configurationError)}</output>
       <output data-testid="user">{auth.user?.id ?? "none"}</output>
+      <output data-testid="access-token">{auth.session?.access_token ?? "none"}</output>
       <output data-testid="role">{auth.role ?? "none"}</output>
       <output data-testid="workspace">{auth.workspaceId ?? "none"}</output>
       <output data-testid="membership-error">{membershipError ?? "none"}</output>
@@ -178,7 +188,7 @@ describe("AuthProvider", () => {
 
     cleanup();
     const missingQuery = membershipQuery();
-    missingQuery.maybeSingle.mockResolvedValue({ data: null, error: null });
+    missingQuery.order.mockResolvedValue({ data: [], error: null });
     authMocks.from.mockReturnValue(missingQuery);
     renderProvider();
 
@@ -234,7 +244,7 @@ describe("AuthProvider", () => {
 
   it("surfaces membership query rejection without clearing authenticated session", async () => {
     const query = membershipQuery();
-    query.maybeSingle.mockRejectedValue(new Error("membership request failed"));
+    query.order.mockRejectedValue(new Error("membership request failed"));
     authMocks.getSession.mockResolvedValue({ data: { session }, error: null });
     authMocks.from.mockReturnValue(query);
 
@@ -246,8 +256,8 @@ describe("AuthProvider", () => {
   });
 
   it("keeps latest session and loading state when an older membership response resolves late", async () => {
-    const firstMembership = deferred<{ data: { role: "analyst"; workspace_id: string }; error: null }>();
-    const secondMembership = deferred<{ data: { role: "manager"; workspace_id: string }; error: null }>();
+    const firstMembership = deferred<{ data: { role: "analyst"; workspace_id: string; status: string }[]; error: null }>();
+    const secondMembership = deferred<{ data: { role: "manager"; workspace_id: string; status: string }[]; error: null }>();
     const firstSession = { ...sessionTemplate, user: { ...sessionUser, id: "user-1" } } as never;
     const secondSession = { ...sessionTemplate, user: { ...sessionUser, id: "user-2" }, access_token: "access-token-2" } as never;
     let authChange!: (event: string, nextSession: unknown) => void;
@@ -256,9 +266,9 @@ describe("AuthProvider", () => {
       return { data: { subscription: { unsubscribe: authMocks.unsubscribe } } };
     });
     const firstQuery = membershipQuery();
-    firstQuery.maybeSingle.mockReturnValue(firstMembership.promise);
+    firstQuery.order.mockReturnValue(firstMembership.promise);
     const secondQuery = membershipQuery("manager");
-    secondQuery.maybeSingle.mockReturnValue(secondMembership.promise);
+    secondQuery.order.mockReturnValue(secondMembership.promise);
     authMocks.from
       .mockImplementationOnce(() => firstQuery)
       .mockImplementationOnce(() => secondQuery);
@@ -270,13 +280,72 @@ describe("AuthProvider", () => {
     await waitFor(() => expect(authMocks.from).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(screen.getByTestId("loading")).toHaveTextContent("true"));
 
-    await act(async () => firstMembership.resolve({ data: { role: "analyst", workspace_id: "workspace-1" }, error: null }));
+    await act(async () => firstMembership.resolve({ data: [{ role: "analyst", workspace_id: "workspace-1", status: "active" }], error: null }));
     expect(screen.getByTestId("loading")).toHaveTextContent("true");
 
-    await act(async () => secondMembership.resolve({ data: { role: "manager", workspace_id: "workspace-2" }, error: null }));
+    await act(async () => secondMembership.resolve({ data: [{ role: "manager", workspace_id: "workspace-2", status: "active" }], error: null }));
     await waitFor(() => expect(screen.getByTestId("role")).toHaveTextContent("manager"));
     expect(screen.getByTestId("workspace")).toHaveTextContent("workspace-2");
     expect(screen.getByTestId("loading")).toHaveTextContent("false");
+  });
+
+  it("keeps the workspace mounted when only the access token rotates", async () => {
+    // Supabase auto-refreshes the access token roughly hourly. ProtectedRoute unmounts
+    // the entire workspace whenever loading flips true, so a rotation must not be
+    // mistaken for a new session: no reset, no re-query, nothing torn down.
+    let authChange!: (event: string, nextSession: unknown) => void;
+    authMocks.onAuthStateChange.mockImplementation((callback: typeof authChange) => {
+      authChange = callback;
+      return { data: { subscription: { unsubscribe: authMocks.unsubscribe } } };
+    });
+    authMocks.getSession.mockResolvedValue({ data: { session }, error: null });
+    authMocks.from.mockReturnValue(membershipQuery("manager"));
+    renderProvider();
+
+    await waitFor(() => expect(screen.getByTestId("role")).toHaveTextContent("manager"));
+    const queriesBeforeRotation = authMocks.from.mock.calls.length;
+
+    const rotated = { ...sessionTemplate, user: sessionUser, access_token: "access-token-rotated" } as never;
+    await act(async () => {
+      authChange("TOKEN_REFRESHED", rotated);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(screen.getByTestId("loading")).toHaveTextContent("false");
+    expect(screen.getByTestId("role")).toHaveTextContent("manager");
+    expect(screen.getByTestId("workspace")).toHaveTextContent("workspace-1");
+    expect(authMocks.from).toHaveBeenCalledTimes(queriesBeforeRotation);
+    // The rotated token still has to reach consumers, or the context holds a stale one.
+    expect(screen.getByTestId("access-token")).toHaveTextContent("access-token-rotated");
+  });
+
+  it("resolves to the active membership when the user belongs to two workspaces", async () => {
+    // A manager of another workspace can invite someone who is already active here, so a
+    // second row is reachable. maybeSingle() used to error on it and lock the user out of
+    // every workspace while blaming their connection.
+    authMocks.getSession.mockResolvedValue({ data: { session }, error: null });
+    authMocks.from.mockReturnValue(membershipQuery("analyst", "active", [
+      { role: "analyst", workspace_id: "workspace-pending", status: "pending", created_at: "2026-07-01T00:00:00.000Z" },
+      { role: "manager", workspace_id: "workspace-active", status: "active", created_at: "2026-08-01T00:00:00.000Z" },
+    ]));
+    renderProvider();
+
+    await waitFor(() => expect(screen.getByTestId("membership-status")).toHaveTextContent("active"));
+    expect(screen.getByTestId("role")).toHaveTextContent("manager");
+    expect(screen.getByTestId("workspace")).toHaveTextContent("workspace-active");
+    expect(screen.getByTestId("membership-error")).toHaveTextContent("none");
+  });
+
+  it("falls back to the oldest membership when none is active", async () => {
+    authMocks.getSession.mockResolvedValue({ data: { session }, error: null });
+    authMocks.from.mockReturnValue(membershipQuery("analyst", "pending", [
+      { role: "analyst", workspace_id: "workspace-oldest", status: "pending", created_at: "2026-07-01T00:00:00.000Z" },
+      { role: "analyst", workspace_id: "workspace-newer", status: "pending", created_at: "2026-08-01T00:00:00.000Z" },
+    ]));
+    renderProvider();
+
+    await waitFor(() => expect(screen.getByTestId("membership-status")).toHaveTextContent("pending"));
+    expect(screen.getByTestId("membership-error")).toHaveTextContent("none");
   });
 
   it("synchronizes sign-in membership once when auth event also reports the session", async () => {

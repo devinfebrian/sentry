@@ -61,8 +61,14 @@ function mapSignInError(error: unknown) {
     : GENERIC_SIGN_IN_ERROR;
 }
 
-function sessionKey(nextSession: Session | null) {
-  return nextSession ? `${nextSession.user.id}:${nextSession.access_token}` : null;
+/**
+ * Identifies whose membership a session belongs to — deliberately the user id alone,
+ * never the access token. Supabase rotates the token roughly hourly, and keying on it
+ * would make every rotation look like a new session: ProtectedRoute unmounts the whole
+ * workspace while `loading` is true, so the user would lose in-flight work on a timer.
+ */
+function membershipKey(nextSession: Session | null) {
+  return nextSession ? nextSession.user.id : null;
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -85,19 +91,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [membershipStatus, setMembershipStatus] = useState<MembershipStatus>("unknown");
 
   const synchronizeSession = (nextSession: Session | null, force = false): Promise<SessionSyncResult> => {
-    const key = sessionKey(nextSession);
+    const key = membershipKey(nextSession);
     const state = syncState.current;
+
+    // Both guards sit above every state mutation. Returning after setLoading(true)
+    // would strand the app on the loading screen with nothing left to clear it.
+    if (!mountedRef.current) return Promise.resolve("stale");
+    if (!client) return Promise.resolve("error");
+
+    // The session object is refreshed unconditionally, even when membership needs no
+    // re-check, so a rotated access token never lingers stale in context.
+    setSession(nextSession);
+    setUser(nextSession?.user ?? null);
 
     if (state.pending && state.pendingKey === key) return state.pending;
     if (!force && state.completedKey === key && state.completedResult) return Promise.resolve(state.completedResult);
-    if (!mountedRef.current) return Promise.resolve("stale");
 
     const generation = ++state.generation;
     state.completedKey = undefined;
     state.completedResult = null;
     setLoading(true);
-    setSession(nextSession);
-    setUser(nextSession?.user ?? null);
     setRole(null);
     setWorkspaceId(null);
     setMembershipError(null);
@@ -110,15 +123,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return Promise.resolve("signed-out");
     }
 
-    if (!client) return Promise.resolve("error");
-
     const promise = (async () => {
       try {
+        // Ordered rows rather than maybeSingle(): a user may hold memberships in more
+        // than one workspace, and maybeSingle() errors on a second row — which would
+        // lock them out of every workspace and blame their connection for it.
         const { data, error } = await client
           .from("sentinel_members")
-          .select("role, workspace_id, status")
+          .select("role, workspace_id, status, created_at")
           .eq("user_id", nextSession.user.id)
-          .maybeSingle();
+          .order("created_at", { ascending: true });
 
         if (!mountedRef.current || generation !== state.generation) return "stale";
         if (error) {
@@ -128,17 +142,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setMembershipStatus("error");
           return "error";
         }
-        if (!data) {
+
+        // Prefer an active membership, else the oldest. Chosen explicitly rather than by
+        // ordering on `status`, whose alphabetical accident would break on a new value.
+        const rows = data ?? [];
+        const membership = rows.find((row) => row.status === "active") ?? rows[0];
+
+        if (!membership) {
           setMembershipStatus("missing");
           return "missing";
         }
-        if (data.status === "pending") {
+        if (membership.status === "pending") {
           setMembershipStatus("pending");
           return "pending";
         }
 
-        setRole(data.role);
-        setWorkspaceId(data.workspace_id);
+        setRole(membership.role);
+        setWorkspaceId(membership.workspace_id);
         setMembershipStatus("active");
         return "active";
       } catch {

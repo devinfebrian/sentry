@@ -44,8 +44,8 @@ function membershipQuery(status: "active" | "pending" = "active") {
   const query = {
     select: vi.fn(),
     eq: vi.fn(),
-    maybeSingle: vi.fn().mockResolvedValue({
-      data: { role: "analyst", workspace_id: "workspace-1", status },
+    order: vi.fn().mockResolvedValue({
+      data: [{ role: "analyst", workspace_id: "workspace-1", status, created_at: "2026-08-01T00:00:00.000Z" }],
       error: null,
     }),
   };
@@ -135,7 +135,7 @@ describe("SignInPage", () => {
 
   it("announces membership query failures as a polite live error", async () => {
     const query = membershipQuery();
-    query.maybeSingle.mockRejectedValue(new Error("membership request failed"));
+    query.order.mockRejectedValue(new Error("membership request failed"));
     authMocks.getSession.mockResolvedValue({ data: { session }, error: null });
     authMocks.from.mockReturnValue(query);
 
