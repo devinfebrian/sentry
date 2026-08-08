@@ -2,7 +2,7 @@ import { useState, type FormEvent } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { ErrorState } from "../components/ui/ErrorState";
 import { LoadingState } from "../components/ui/LoadingState";
-import { MEMBERSHIP_PENDING_ERROR, useAuth } from "../auth/AuthProvider";
+import { useAuth } from "../auth/AuthProvider";
 
 interface SignInLocationState {
   from?: {
@@ -13,7 +13,7 @@ interface SignInLocationState {
 }
 
 export function SignInPage() {
-  const { loading, configurationError, membershipError, membershipStatus, session, role, workspaceId, signIn } = useAuth();
+  const { loading, configurationError, membershipError, membershipStatus, session, signIn } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [email, setEmail] = useState("");
@@ -22,8 +22,10 @@ export function SignInPage() {
   const from = (location.state as SignInLocationState | null)?.from;
   const destinationPath = from?.pathname && from.pathname !== "/sign-in" ? from.pathname : "/";
   const destination = `${destinationPath}${from?.search ?? ""}${from?.hash ?? ""}`;
-  const accessError = membershipError ?? (session && (!role || !workspaceId) ? MEMBERSHIP_PENDING_ERROR : null);
-  const visibleError = authError ?? accessError;
+  // Only a membership `error` keeps us on this page — pending and missing both redirect
+  // below, and ProtectedRoute explains them there. So membershipError is the only access
+  // failure this page can ever render.
+  const visibleError = authError ?? membershipError;
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();

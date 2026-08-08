@@ -78,6 +78,7 @@ function AuthProbe() {
   const membershipError = (auth as typeof auth & { membershipError?: string | null }).membershipError;
   const membershipStatus = (auth as typeof auth & { membershipStatus?: string }).membershipStatus;
   const [signInError, setSignInError] = useState<string | null>(null);
+  const [signOutError, setSignOutError] = useState<string | null>(null);
 
   return (
     <div>
@@ -90,14 +91,18 @@ function AuthProbe() {
       <output data-testid="membership-error">{membershipError ?? "none"}</output>
       <output data-testid="membership-status">{membershipStatus ?? "unknown"}</output>
       <output data-testid="sign-in-error">{signInError ?? "none"}</output>
+      <output data-testid="sign-out-error">{signOutError ?? "none"}</output>
       <button
         type="button"
         onClick={async () => setSignInError((await auth.signIn("analyst@example.com", "password")) ?? null)}
       >
         Sign in
       </button>
-      <button type="button" onClick={() => void auth.signOut()}>
+      <button type="button" onClick={async () => setSignOutError((await auth.signOut()) ?? null)}>
         Sign out
+      </button>
+      <button type="button" onClick={() => void auth.refreshMembership()}>
+        Check again
       </button>
     </div>
   );
@@ -317,6 +322,55 @@ describe("AuthProvider", () => {
     expect(authMocks.from).toHaveBeenCalledTimes(queriesBeforeRotation);
     // The rotated token still has to reach consumers, or the context holds a stale one.
     expect(screen.getByTestId("access-token")).toHaveTextContent("access-token-rotated");
+  });
+
+  it("re-checks membership on demand so an activated member is not stranded", async () => {
+    // A manager activating someone changes nothing in that person's already-loaded tab:
+    // the token is unchanged, so the dedup cache keeps serving the pending result.
+    authMocks.getSession.mockResolvedValue({ data: { session }, error: null });
+    authMocks.from
+      .mockImplementationOnce(() => membershipQuery("analyst", "pending"))
+      .mockImplementationOnce(() => membershipQuery("analyst", "active"));
+    renderProvider();
+
+    await waitFor(() => expect(screen.getByTestId("membership-status")).toHaveTextContent("pending"));
+
+    await userEvent.click(screen.getByRole("button", { name: "Check again" }));
+
+    await waitFor(() => expect(screen.getByTestId("membership-status")).toHaveTextContent("active"));
+    expect(screen.getByTestId("role")).toHaveTextContent("analyst");
+  });
+
+  it("clears the local session and warns when remote sign-out fails", async () => {
+    authMocks.signInWithPassword.mockResolvedValue({ data: { session, user: sessionUser }, error: null });
+    authMocks.from.mockReturnValue(membershipQuery("manager"));
+    authMocks.signOut.mockResolvedValue({ error: { message: "network unreachable" } });
+    renderProvider();
+
+    await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    await waitFor(() => expect(screen.getByTestId("role")).toHaveTextContent("manager"));
+
+    await userEvent.click(screen.getByRole("button", { name: "Sign out" }));
+
+    // Someone who clicks Sign out and walks away must not be left authenticated on this
+    // machine, so the local session goes regardless of what the server said.
+    await waitFor(() => expect(screen.getByTestId("user")).toHaveTextContent("none"));
+    expect(screen.getByTestId("role")).toHaveTextContent("none");
+    expect(screen.getByTestId("sign-out-error")).toHaveTextContent(/could not be reached/i);
+  });
+
+  it("reports no error when sign-out succeeds", async () => {
+    authMocks.signInWithPassword.mockResolvedValue({ data: { session, user: sessionUser }, error: null });
+    authMocks.from.mockReturnValue(membershipQuery("manager"));
+    renderProvider();
+
+    await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    await waitFor(() => expect(screen.getByTestId("role")).toHaveTextContent("manager"));
+
+    await userEvent.click(screen.getByRole("button", { name: "Sign out" }));
+
+    await waitFor(() => expect(screen.getByTestId("user")).toHaveTextContent("none"));
+    expect(screen.getByTestId("sign-out-error")).toHaveTextContent("none");
   });
 
   it("resolves to the active membership when the user belongs to two workspaces", async () => {

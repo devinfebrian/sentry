@@ -55,7 +55,8 @@ const authenticatedAuth = {
   configurationError: null,
   membershipError: null,
   signIn: async () => null,
-  signOut: async () => undefined,
+  signOut: async () => null,
+  refreshMembership: async () => undefined,
 } as AuthContextValue;
 
 function renderAuthenticatedApp() {

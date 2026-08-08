@@ -25,13 +25,21 @@ export interface AuthContextValue {
   membershipError: string | null;
   membershipStatus: MembershipStatus;
   signIn: (email: string, password: string) => Promise<string | null>;
-  signOut: () => Promise<void>;
+  /** Resolves to a warning when the session was cleared locally but not revoked remotely. */
+  signOut: () => Promise<string | null>;
+  /**
+   * Re-reads membership for the current session. Activation happens in a manager's tab,
+   * so nothing about this user's session changes and the cached result would otherwise
+   * keep reporting `pending` until they reload.
+   */
+  refreshMembership: () => Promise<void>;
 }
 
 export const CONFIGURATION_ERROR = "Supabase is not configured. Add the public project URL and publishable key.";
 export const MEMBERSHIP_QUERY_ERROR = "Workspace membership could not be loaded. Check your connection and try again.";
 export const MEMBERSHIP_PENDING_ERROR = "Workspace access is pending. Ask a workspace manager for an active membership.";
 export const MEMBERSHIP_MISSING_ERROR = "Workspace access denied. No active membership was found for this account.";
+export const SIGN_OUT_REMOTE_ERROR = "Signed out on this device, but the server could not be reached. Your session may stay active elsewhere until it expires.";
 
 const INVALID_CREDENTIALS_ERROR = "Could not sign you in. Check your email and password.";
 const GENERIC_SIGN_IN_ERROR = "Could not sign you in. Try again.";
@@ -46,7 +54,8 @@ const defaultAuthContext: AuthContextValue = {
   membershipError: null,
   membershipStatus: "unknown",
   signIn: async () => GENERIC_SIGN_IN_ERROR,
-  signOut: async () => undefined,
+  signOut: async () => null,
+  refreshMembership: async () => undefined,
 };
 
 export const AuthContext = createContext<AuthContextValue>(defaultAuthContext);
@@ -238,15 +247,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signOut = async () => {
-    if (!isSupabaseConfigured || !client) return;
+    if (!isSupabaseConfigured || !client) return null;
 
     const { error } = await client.auth.signOut();
-    if (error) return;
-    await synchronizeSession(null);
+    // The local session is cleared either way. Failing closed would leave someone who
+    // clicked Sign out and walked away still authenticated on this machine, which is
+    // worse than a token that stays valid server-side until it expires.
+    await synchronizeSession(null, true);
+    return error ? SIGN_OUT_REMOTE_ERROR : null;
+  };
+
+  const refreshMembership = async () => {
+    await synchronizeSession(session, true);
   };
 
   return (
-    <AuthContext.Provider value={{ session, user, role, workspaceId, loading, configurationError, membershipError, membershipStatus, signIn, signOut }}>
+    <AuthContext.Provider value={{ session, user, role, workspaceId, loading, configurationError, membershipError, membershipStatus, signIn, signOut, refreshMembership }}>
       {children}
     </AuthContext.Provider>
   );

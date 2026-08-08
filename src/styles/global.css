@@ -402,6 +402,21 @@ kbd {
   border-left: 3px solid var(--color-risk);
 }
 
+/* The panel itself is a grid, so buttons would otherwise stack full-width. */
+.state-panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.sign-out-warning {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--color-risk);
+  font: var(--text-caption);
+}
+
 .loading-state {
   display: flex;
   align-items: center;
