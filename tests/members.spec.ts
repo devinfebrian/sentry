@@ -144,9 +144,10 @@ async function seedPendingMember(workspaceId: string, managerId: string) {
   // Visible in the Playwright report so the domain that actually worked is on record.
   console.log(`[members.spec] seeded pending member @${usedDomain}`);
 
-  // From here on, everything created must be torn down before rethrowing: a partial seed
-  // (an orphan auth user, or an orphan pending sentinel_members row) would corrupt the
-  // shared roster for every other spec, exactly what this file exists to avoid.
+  // From here on, a failure must attempt to tear down whatever already got created before
+  // rethrowing: a partial seed (an orphan auth user, or an orphan pending sentinel_members
+  // row) would corrupt the shared roster for every other spec. The catch block below makes
+  // a best-effort attempt at that -- see its comment for what is and isn't guaranteed.
   try {
     const memberInsert = await adminRest("sentinel_members", {
       method: "POST",
@@ -178,13 +179,36 @@ async function seedPendingMember(workspaceId: string, managerId: string) {
 
     return { email, userId, reservationId: reservationInsert.body[0].id as string } satisfies PendingMemberSeed;
   } catch (error) {
-    // Deleting the auth user cascades away any sentinel_members row that made it in.
-    // Also sweep by workspace+email in case a reservation was inserted but its id was
-    // unreadable from the response, so nothing seeded here survives the throw.
-    await adminAuth(`admin/users/${userId}`, { method: "DELETE" }).catch(() => {});
-    await adminRest(`sentinel_invitation_reservations?workspace_id=eq.${workspaceId}&email=eq.${email.toLowerCase()}`, {
-      method: "DELETE",
-    }).catch(() => {});
+    // Teardown here is best-effort, not a guarantee: adminAuth/adminRest resolve normally
+    // on a non-2xx (they never throw for HTTP errors), so a 403/404/500 on either call
+    // below would previously be swallowed by a bare `.catch(() => {})` and never surface.
+    // Checking `status` explicitly and warning on failure means a leaked auth user or
+    // reservation row is at least logged with the identifiers needed to sweep it by hand.
+    // The original seeding error is always what propagates -- teardown never throws.
+    const authTeardown = await adminAuth(`admin/users/${userId}`, { method: "DELETE" }).catch((networkError) => ({
+      status: 0,
+      body: { networkError: String(networkError) },
+    }));
+    // 404 means the auth user is already gone (e.g. it was never fully created) -- fine.
+    if (authTeardown.status >= 300 && authTeardown.status !== 404) {
+      console.warn(
+        `[members.spec] teardown failed to delete seeded auth user ${userId} (${email}): ${authTeardown.status} ${JSON.stringify(authTeardown.body)}`,
+      );
+    }
+
+    // Deleting the auth user cascades away any sentinel_members row that made it in. This
+    // sweep only needs to catch a reservation whose id was unreadable from the insert
+    // response above, so it is keyed by workspace+email rather than a stored id.
+    const reservationTeardown = await adminRest(
+      `sentinel_invitation_reservations?workspace_id=eq.${workspaceId}&email=eq.${email.toLowerCase()}`,
+      { method: "DELETE" },
+    ).catch((networkError) => ({ status: 0, body: { networkError: String(networkError) } }));
+    if (reservationTeardown.status >= 300) {
+      console.warn(
+        `[members.spec] teardown failed to delete seeded reservation for ${email} in workspace ${workspaceId}: ${reservationTeardown.status} ${JSON.stringify(reservationTeardown.body)}`,
+      );
+    }
+
     throw error;
   }
 }
