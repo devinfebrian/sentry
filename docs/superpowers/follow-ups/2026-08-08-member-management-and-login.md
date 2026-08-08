@@ -1,0 +1,97 @@
+# Follow-ups: member management and the login path
+
+**Date:** 2026-08-08
+**Covers:** `83e3ec4..e173e8d` — the member-management feature (8 tasks) and the login-path audit (6 fixes)
+
+Findings that were reviewed, triaged, and deliberately not fixed. Each was seen by at least
+one reviewer and consciously deferred; none is an unknown. Grouped by whether it is worth
+acting on.
+
+## Should fix soon
+
+**Playwright cross-file isolation is incidental, not guaranteed.**
+`playwright.config.ts` sets `fullyParallel: true`. `tests/members.spec.ts` declares
+`test.describe.configure({ mode: "serial" })`, but that only serialises *within* the file.
+It happens to be safe today because no spec asserts on member counts — `workspace.spec.ts`
+uses `not.toHaveCount(1)` and an empty-roster check. That is one assertion away from
+flaking. All evidence for the feature was gathered at `--workers=1`.
+
+**Role change has no UI-level end-to-end coverage.**
+`Make manager` / `Make analyst` are exercised only through direct REST calls in
+`tests/members.spec.ts`. The buttons themselves, and the `runAction` → `mutate` →
+refetch path behind them, are covered by unit tests but never driven in a real browser.
+
+**The schema verification script is loosely scoped.**
+`supabase/verify_sentinel_member_management.sql` looks functions up by name without a
+signature filter, so a same-named function with different arguments would satisfy it, and
+its `pg_constraint` lookup matches on `conname` without scoping to the table. The
+privilege assertions *are* signature-qualified and the `service_role` DELETE check landed,
+so the residue is low-risk.
+
+**Manual check never performed.**
+The login-path fix for token rotation is proven by unit test — no re-query, no `loading`
+flip — but nobody has confirmed in a real browser that an open Import dialog with a
+previewed file survives an actual refresh. To verify: `npm run dev`, sign in, select a
+file in the Import dialog, then force a token refresh (devtools, or shorten the JWT
+expiry in Supabase Auth settings).
+
+## Known gaps, accepted
+
+**Reject-then-reinvite writes no second `member-invited` event.**
+After a pending invitation is rejected and the same address invited again, the audit log
+reads invited → rejected → nothing. The reservation is `failed` so `claimReservation`
+re-claims it, but `reservation.auth_user_id` is still populated from the first invite, so
+the flow skips `findAuthUserByEmail` and reaches the **direct** insert at
+`supabase/functions/invite-member/index.ts:358`, whose
+`if (eventError && eventError.code !== "23505")` silently swallows the partial-unique-index
+violation. Note the design spec attributes this to `reconcileInvitationEvent` — that is
+wrong; the line above is the real one. Fixing it means changing `invite-member`'s
+idempotency model.
+
+**Three `authenticated_security_definer_function_executable` advisor warnings.**
+One per member-management RPC. Inherent to the chosen design — `SECURITY DEFINER`
+functions in `public` granted to `authenticated` — and the in-body
+`private.sentinel_is_manager()` re-derivation is exactly the mitigation the lint asks for.
+Suppress or accept explicitly rather than re-triaging each audit.
+
+**Deleting an `auth.users` row cascades the membership away** with no audit event and no
+last-manager check. Admin-only, outside the product surface.
+
+**A promoted analyst's live session keeps `role: "analyst"` until reload.** `AuthProvider`
+syncs role once per session key. Self-corrects on token refresh, and the new
+`refreshMembership()` gives a manual path.
+
+## Fine to leave
+
+- **Advisory lock key collisions.** `hashtext(...)` returns `int4` into the global
+  single-key `pg_advisory_xact_lock(bigint)` namespace, so two workspaces could collide.
+  Correctness-safe — collisions only over-serialise — and no other advisory lock exists in
+  the schema to deadlock against.
+- **`App.tsx` uses `as unknown as` to cast the Supabase client** to each service's
+  structural type, bypassing compile-time checking on `rpc()`. Pre-existing pattern applied
+  uniformly to all three service clients.
+- **`mutate()` does not serialise concurrent calls** — it reads `requestIdRef` but never
+  increments it, so the last resolver wins. Genuinely gated today by `busyUserId` plus the
+  disabled invite controls.
+- **`activeManagerCount`'s memo never memoises** while the roster is loading, because
+  `members` is a fresh `[]` each render. Cost is a filter over zero items; it would matter
+  only if `members` ever entered a dependency array.
+- **The last-manager hint is effectively dead copy.** After the self-demotion guard landed,
+  a non-self manager row implies a second active manager exists, so
+  *"Workspace must keep at least one manager."* is near-unreachable in the UI. The server
+  guard remains load-bearing. Relatedly,
+  `disables demotion when only one active manager remains` now passes for two reasons and
+  no longer isolates the `activeManagerCount` guard.
+- **The last-manager hint has no `aria-describedby`** tying it to its button. The button is
+  disabled and therefore unfocusable, so the text is read as row content.
+- **Non-`Error` invite rejections say "Unable to update member."** where they used to say
+  "Unable to invite member." `invite()` only ever throws `Error`, so the path is
+  unreachable.
+
+## Closed since triage
+
+Recorded so nobody re-opens them: the migration-history desync, the self-demotion empty
+state, row actions being dead during an in-flight invite, the stale `database.types.ts`,
+`sortMembers`' locale-sensitive comparison, the `.data-table` min-width predating the fifth
+column, and `cleanupPendingMember`'s `finally` masking assertion failures — all fixed in
+`b1af828` and the commits around it.
