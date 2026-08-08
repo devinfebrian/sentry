@@ -10,7 +10,8 @@ import { LoadingState } from "../components/ui/LoadingState";
 import { EvidenceLedger } from "../components/evidence/EvidenceLedger";
 import { FindingPanel } from "../components/evidence/FindingPanel";
 import { DecisionRecord as DecisionRecordComponent } from "../components/decisions/DecisionRecord";
-import type { AgentStage, CaseSummary, DecisionRecord as DecisionRecordData, EvidenceRecord, Finding, SentinelInvestigationService } from "../domain/types";
+import { UploadStatusPanel } from "../components/cases/UploadStatusPanel";
+import type { AgentStage, CaseSummary, DecisionRecord as DecisionRecordData, EvidenceRecord, Finding, SentinelInvestigationService, SentinelUploadService } from "../domain/types";
 
 const stepCopy: Record<string, { eyebrow: string; title: string; description: string }> = {
   summary: { eyebrow: "Case workspace / summary", title: "Investigation summary", description: "Review current agent progress, risk signals, and the next accountable action." },
@@ -30,6 +31,7 @@ export interface CaseWorkspaceDemoData {
 
 export interface CaseWorkspacePageProps {
   investigationService?: Pick<SentinelInvestigationService, "getById"> | null;
+  uploadService?: Pick<SentinelUploadService, "getLatestForInvestigation" | "getStatus" | "listRows" | "retryParsing"> | null;
   demoData?: CaseWorkspaceDemoData;
 }
 
@@ -42,7 +44,7 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Try again to reload this persisted investigation.";
 }
 
-export function CaseWorkspacePage({ investigationService, demoData }: CaseWorkspacePageProps) {
+export function CaseWorkspacePage({ investigationService, uploadService, demoData }: CaseWorkspacePageProps) {
   const { caseId = "", step = "summary" } = useParams();
   const [retryKey, setRetryKey] = useState(0);
   const [state, setState] = useState<LoadState>(() => demoData
@@ -114,7 +116,14 @@ export function CaseWorkspacePage({ investigationService, demoData }: CaseWorksp
             {step === "decision" && <DecisionRecordComponent decision={demoData.decision} />}
             {step === "report" && <section className="step-placeholder"><span className="section-kicker">Evidence-led workflow</span><h3>{content.title} module ready</h3><p>Use ordered case steps to keep source review, decision, and reporting connected.</p></section>}
           </>
-        ) : <AnalysisNotStartedState step={step} />}
+        ) : (
+          <>
+            {/* Source data is real once parsed; agent output still is not. Both are
+                reported, separately, rather than letting one imply the other. */}
+            {step === "summary" && <UploadStatusPanel investigationId={caseItem.databaseId} uploadService={uploadService} />}
+            <AnalysisNotStartedState step={step} />
+          </>
+        )}
       </div>
     </div>
   );

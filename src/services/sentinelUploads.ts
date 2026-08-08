@@ -13,7 +13,9 @@ type UploadUpdate = Database["public"]["Tables"]["sentinel_uploads"]["Update"];
 type ImportRowRow = Database["public"]["Tables"]["sentinel_import_rows"]["Row"];
 
 export type SentinelUploadReadQuery = {
-  eq(column: "workspace_id" | "id", value: string): SentinelUploadReadQuery;
+  eq(column: "workspace_id" | "id" | "investigation_id", value: string): SentinelUploadReadQuery;
+  order(column: "created_at", options: { ascending: boolean }): SentinelUploadReadQuery;
+  limit(count: number): PromiseLike<PostgrestResponse<UploadRow>>;
   maybeSingle(): PromiseLike<PostgrestMaybeSingleResponse<UploadRow>>;
 };
 
@@ -47,7 +49,8 @@ export class SentinelUploadRecoveryError extends Error {
 
 export type SentinelImportRowReadQuery = {
   eq(column: "workspace_id" | "upload_id", value: string): SentinelImportRowReadQuery;
-  order(column: "source_row", options: { ascending: boolean }): PromiseLike<PostgrestResponse<ImportRowRow>>;
+  order(column: "source_row", options: { ascending: boolean }): SentinelImportRowReadQuery;
+  limit(count: number): PromiseLike<PostgrestResponse<ImportRowRow>>;
 };
 
 type StorageUpload = {
@@ -79,6 +82,12 @@ export type SentinelUploadClient = {
 };
 
 type SentinelUploadContext = { workspaceId: string; userId: string };
+
+/**
+ * A parse accepts up to MAX_ROWS (100k) rows. Callers ask for a preview, so the read is
+ * bounded by construction rather than by every caller remembering to bound it.
+ */
+export const DEFAULT_ROW_LIMIT = 500;
 
 function sanitizeFilename(filename: string, extension: string) {
   const leaf = getFilenameLeaf(filename);
@@ -250,13 +259,31 @@ export function createSentinelUploadService(
       return invokeParser(client, uploadId, "retry parsing");
     },
 
-    async listRows(uploadId) {
+    async getLatestForInvestigation(investigationId) {
+      const { data, error } = await client
+        .from("sentinel_uploads")
+        .select("*")
+        .eq("workspace_id", context.workspaceId)
+        .eq("investigation_id", investigationId)
+        .order("created_at", { ascending: false })
+        .limit(1);
+      if (error) {
+        throw mapError("load latest upload", error);
+      }
+
+      // No upload is a legitimate state — an investigation can be created without one.
+      const row = data?.[0];
+      return row ? mapUpload(row) : null;
+    },
+
+    async listRows(uploadId, limit = DEFAULT_ROW_LIMIT) {
       const { data, error } = await client
         .from("sentinel_import_rows")
         .select("*")
         .eq("workspace_id", context.workspaceId)
         .eq("upload_id", uploadId)
-        .order("source_row", { ascending: true });
+        .order("source_row", { ascending: true })
+        .limit(limit);
       if (error) {
         throw mapError("list import rows", error);
       }

@@ -109,6 +109,14 @@ test.describe("analyst workspace", () => {
     const sourceRows = finalRows.body.map((row: { source_row: number }) => row.source_row).sort();
     expect(sourceRows).toEqual([2, 3, 4]);
 
+    // The parse result has to reach the analyst, not just the database — the case page
+    // used to say "Analysis not started" forever with no sign the upload had worked.
+    await page.goto(`/cases/${reference}/summary`);
+    await expect(page.getByText("3 records imported")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText("Northwind Traders").first()).toBeVisible();
+    // Agent output genuinely has not run, and must still say so.
+    await expect(page.getByRole("heading", { name: /analysis not started/i })).toBeVisible();
+
     // The original file must not be readable without authentication.
     const publicResponse = await fetch(`${supabaseUrl}/storage/v1/object/public/sentinel-imports/${upload.storage_path}`);
     expect(publicResponse.ok, "original upload must not be publicly fetchable").toBe(false);
