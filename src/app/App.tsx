@@ -83,7 +83,7 @@ function WorkspaceLayout() {
       <Routes>
         <Route path="/" element={<OverviewPage investigationService={investigationService} importButtonRef={overviewImportButtonRef} onImportData={() => setImportOpen(true)} />} />
         <Route path="/cases" element={<CasesPage investigationService={investigationService} importButtonRef={casesImportButtonRef} onImportData={() => setImportOpen(true)} />} />
-        <Route path="/cases/:caseId/:step" element={<CaseWorkspacePage investigationService={investigationService} />} />
+        <Route path="/cases/:caseId/:step" element={<CaseWorkspacePage investigationService={investigationService} uploadService={uploadService} />} />
         <Route path="/evidence" element={<AnalysisNotStartedPage module="Evidence" step="evidence" />} />
         <Route path="/reports" element={<AnalysisNotStartedPage module="Reports" step="report" />} />
         <Route path="/operations" element={<AnalysisNotStartedPage module="Agent pipeline" step="summary" />} />

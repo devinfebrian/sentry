@@ -7,6 +7,7 @@ import type {
 import type { Database } from "../lib/database.types";
 import {
   createSentinelUploadService,
+  DEFAULT_ROW_LIMIT,
   type SentinelImportRowReadQuery,
   type SentinelUploadClient,
   type SentinelUploadInsertQuery,
@@ -107,12 +108,20 @@ function errorResponse<T>(operation: string, message: string): PostgrestSingleRe
   };
 }
 
-function createReadQuery(response: PromiseLike<PostgrestMaybeSingleResponse<UploadRow>>) {
+function createReadQuery(
+  response: PromiseLike<PostgrestMaybeSingleResponse<UploadRow>>,
+  listResult?: PromiseLike<PostgrestResponse<UploadRow>>,
+) {
   let query!: UploadReadQuery;
-  const eq = vi.fn((_column: "workspace_id" | "id", _value: string): UploadReadQuery => query);
+  const eq = vi.fn((_column: "workspace_id" | "id" | "investigation_id", _value: string): UploadReadQuery => query);
+  const order = vi.fn((_column: "created_at", _options: { ascending: boolean }): UploadReadQuery => query);
+  const limit = vi.fn((_count: number) => {
+    if (!listResult) throw new Error("Unexpected upload limit query.");
+    return listResult;
+  });
   const maybeSingle = vi.fn(() => response);
-  query = { eq, maybeSingle } satisfies UploadReadQuery;
-  return { query, eq, maybeSingle };
+  query = { eq, order, limit, maybeSingle } satisfies UploadReadQuery;
+  return { query, eq, order, limit, maybeSingle };
 }
 
 function createUploadInsertQuery(response: PromiseLike<PostgrestSingleResponse<UploadRow>>) {
@@ -135,9 +144,10 @@ function createUploadUpdateQuery(response: PromiseLike<PostgrestSingleResponse<U
 function createRowQuery(response: PromiseLike<PostgrestResponse<ImportRow>>) {
   let query!: ImportRowReadQuery;
   const eq = vi.fn((_column: "workspace_id" | "upload_id", _value: string): ImportRowReadQuery => query);
-  const order = vi.fn((_column: "source_row", _options: { ascending: boolean }) => response);
-  query = { eq, order } satisfies ImportRowReadQuery;
-  return { query, eq, order };
+  const order = vi.fn((_column: "source_row", _options: { ascending: boolean }): ImportRowReadQuery => query);
+  const limit = vi.fn((_count: number) => response);
+  query = { eq, order, limit } satisfies ImportRowReadQuery;
+  return { query, eq, order, limit };
 }
 
 function createClient(options: {
@@ -421,5 +431,79 @@ describe("createSentinelUploadService", () => {
     await expect(fake.service.listRows(uploadId)).rejects.toThrow("Unable to list import rows: rows denied");
     expect(fake.from).toHaveBeenCalledTimes(1);
     expect(fake.from).not.toHaveBeenCalledWith("sentinel_import_rows", expect.objectContaining({ insert: expect.anything() }));
+  });
+
+  describe("listRows bounding", () => {
+    it("bounds an unbounded call so a 100k-row import cannot reach the browser", async () => {
+      const { query, limit } = createRowQuery(Promise.resolve(listResponse(importRows)));
+
+      await serviceFor({ rowQuery: query }).service.listRows(uploadId);
+
+      expect(limit).toHaveBeenCalledWith(DEFAULT_ROW_LIMIT);
+    });
+
+    it("passes an explicit limit through", async () => {
+      const { query, limit } = createRowQuery(Promise.resolve(listResponse(importRows)));
+
+      await serviceFor({ rowQuery: query }).service.listRows(uploadId, 10);
+
+      expect(limit).toHaveBeenCalledWith(10);
+    });
+  });
+
+  describe("getLatestForInvestigation", () => {
+    it("reads the newest upload scoped to the active workspace", async () => {
+      const { query, eq, order, limit } = createReadQuery(
+        Promise.resolve(maybeSingleResponse(uploadRow)),
+        Promise.resolve(listResponse([uploadRow])),
+      );
+
+      await expect(serviceFor({ uploadReadQuery: query }).service.getLatestForInvestigation(investigationId))
+        .resolves.toEqual({
+          id: uploadId,
+          investigationId,
+          status: "uploaded",
+          rowCount: 2,
+          warnings: ["Skipped blank row"],
+          errorMessage: null,
+        });
+
+      expect(eq).toHaveBeenNthCalledWith(1, "workspace_id", context.workspaceId);
+      expect(eq).toHaveBeenNthCalledWith(2, "investigation_id", investigationId);
+      expect(order).toHaveBeenCalledWith("created_at", { ascending: false });
+      expect(limit).toHaveBeenCalledWith(1);
+    });
+
+    it("returns null when the investigation has no upload", async () => {
+      const { query } = createReadQuery(
+        Promise.resolve(maybeSingleResponse(uploadRow)),
+        Promise.resolve(listResponse([])),
+      );
+
+      await expect(serviceFor({ uploadReadQuery: query }).service.getLatestForInvestigation(investigationId))
+        .resolves.toBeNull();
+    });
+
+    it("wraps a denied read in a readable message", async () => {
+      const denied = {
+        data: null,
+        error: {
+          code: "42501",
+          message: "uploads denied",
+          details: "",
+          hint: "",
+          name: "PostgrestError",
+          toJSON: () => ({ name: "PostgrestError", message: "uploads denied", details: "", hint: "", code: "42501" }),
+        },
+        status: 403,
+        statusText: "Forbidden",
+        success: false,
+        count: null,
+      } as unknown as PostgrestResponse<UploadRow>;
+      const { query } = createReadQuery(Promise.resolve(maybeSingleResponse(uploadRow)), Promise.resolve(denied));
+
+      await expect(serviceFor({ uploadReadQuery: query }).service.getLatestForInvestigation(investigationId))
+        .rejects.toThrow("Unable to load latest upload: uploads denied");
+    });
   });
 });

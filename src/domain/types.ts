@@ -163,5 +163,11 @@ export interface SentinelUploadService {
   startParsing(uploadId: string): Promise<UploadParserResult>;
   getStatus(uploadId: string): Promise<SentinelUpload>;
   retryParsing(uploadId: string): Promise<UploadParserResult>;
-  listRows(uploadId: string): Promise<ImportRow[]>;
+  /** Null when an investigation has no upload, which is legitimate. */
+  getLatestForInvestigation(investigationId: string): Promise<SentinelUpload | null>;
+  /**
+   * Always bounded. A parse accepts up to MAX_ROWS (100k) rows, so an unbounded read would
+   * pull an entire import into the browser to show a handful of them.
+   */
+  listRows(uploadId: string, limit?: number): Promise<ImportRow[]>;
 }
