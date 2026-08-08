@@ -144,55 +144,91 @@ async function seedPendingMember(workspaceId: string, managerId: string) {
   // Visible in the Playwright report so the domain that actually worked is on record.
   console.log(`[members.spec] seeded pending member @${usedDomain}`);
 
-  const memberInsert = await adminRest("sentinel_members", {
-    method: "POST",
-    body: JSON.stringify({
-      workspace_id: workspaceId,
-      user_id: userId,
-      role: "analyst",
-      status: "pending",
-      invited_email: email,
-    }),
-  });
-  if (memberInsert.status >= 300) {
-    throw new Error(`Failed to seed sentinel_members row: ${JSON.stringify(memberInsert.body)}`);
-  }
+  // From here on, everything created must be torn down before rethrowing: a partial seed
+  // (an orphan auth user, or an orphan pending sentinel_members row) would corrupt the
+  // shared roster for every other spec, exactly what this file exists to avoid.
+  try {
+    const memberInsert = await adminRest("sentinel_members", {
+      method: "POST",
+      body: JSON.stringify({
+        workspace_id: workspaceId,
+        user_id: userId,
+        role: "analyst",
+        status: "pending",
+        invited_email: email,
+      }),
+    });
+    if (memberInsert.status >= 300) {
+      throw new Error(`Failed to seed sentinel_members row: ${JSON.stringify(memberInsert.body)}`);
+    }
 
-  const reservationInsert = await adminRest("sentinel_invitation_reservations", {
-    method: "POST",
-    headers: { Prefer: "return=representation" },
-    body: JSON.stringify({
-      workspace_id: workspaceId,
-      email: email.toLowerCase(),
-      invited_by: managerId,
-      status: "completed",
-    }),
-  });
-  if (reservationInsert.status >= 300 || !reservationInsert.body?.[0]?.id) {
-    throw new Error(`Failed to seed sentinel_invitation_reservations row: ${JSON.stringify(reservationInsert.body)}`);
-  }
+    const reservationInsert = await adminRest("sentinel_invitation_reservations", {
+      method: "POST",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify({
+        workspace_id: workspaceId,
+        email: email.toLowerCase(),
+        invited_by: managerId,
+        status: "completed",
+      }),
+    });
+    if (reservationInsert.status >= 300 || !reservationInsert.body?.[0]?.id) {
+      throw new Error(`Failed to seed sentinel_invitation_reservations row: ${JSON.stringify(reservationInsert.body)}`);
+    }
 
-  return { email, userId, reservationId: reservationInsert.body[0].id as string } satisfies PendingMemberSeed;
+    return { email, userId, reservationId: reservationInsert.body[0].id as string } satisfies PendingMemberSeed;
+  } catch (error) {
+    // Deleting the auth user cascades away any sentinel_members row that made it in.
+    // Also sweep by workspace+email in case a reservation was inserted but its id was
+    // unreadable from the response, so nothing seeded here survives the throw.
+    await adminAuth(`admin/users/${userId}`, { method: "DELETE" }).catch(() => {});
+    await adminRest(`sentinel_invitation_reservations?workspace_id=eq.${workspaceId}&email=eq.${email.toLowerCase()}`, {
+      method: "DELETE",
+    }).catch(() => {});
+    throw error;
+  }
 }
 
 /**
- * Delete everything seedPendingMember created. sentinel_members cascades on auth.users
- * delete, so the auth user is the one row that actually disappears here.
+ * Delete everything seedPendingMember created and assert both deletes actually happened.
+ * sentinel_members cascades on auth.users delete, so the auth user is the one row that
+ * disappears implicitly; the reservation row needs its own DELETE (service_role holds the
+ * privilege as of the grant in 20260808000000_sentinel_member_management.sql).
  *
- * The reservation DELETE is best-effort: the service role only holds select/insert/update
- * on sentinel_invitation_reservations (see the grant in
- * supabase/migrations/20260806145323_sentinel_invitation_reservations.sql -- intentional,
- * since the real invite-member function never deletes a reservation either), so this call
- * consistently 403s with 42501 and leaves the row behind. That's harmless: every seeded
- * address is unique per run, so the orphaned row can never collide with a future
- * reservation. It's kept here (rather than removed) so cleanup starts working for free if
- * that grant is ever widened.
+ * Both deletes are attempted regardless of whether the other succeeded, and failures are
+ * collected rather than thrown immediately, so one failing delete never hides the other.
  */
 async function cleanupPendingMember(seed: PendingMemberSeed) {
+  const failures: string[] = [];
+
+  const authDeleted = await adminAuth(`admin/users/${seed.userId}`, { method: "DELETE" });
+  if (authDeleted.status >= 300) {
+    failures.push(`auth user ${seed.userId}: ${authDeleted.status} ${JSON.stringify(authDeleted.body)}`);
+  }
+
+  const reservationDeleted = await adminRest(`sentinel_invitation_reservations?id=eq.${seed.reservationId}`, {
+    method: "DELETE",
+    headers: { Prefer: "return=representation" },
+  });
+  if (reservationDeleted.status >= 300 || !Array.isArray(reservationDeleted.body) || reservationDeleted.body.length !== 1) {
+    failures.push(`reservation ${seed.reservationId}: ${reservationDeleted.status} ${JSON.stringify(reservationDeleted.body)}`);
+  }
+
+  if (failures.length > 0) {
+    throw new Error(`cleanupPendingMember left data behind -- ${failures.join("; ")}`);
+  }
+}
+
+/**
+ * Run cleanup without letting a cleanup failure replace whatever the test itself threw:
+ * a network hiccup or a non-JSON gateway body inside cleanupPendingMember must not mask a
+ * genuine assertion failure. Logged loudly instead so leaked fixtures are still visible.
+ */
+async function cleanupPendingMemberQuietly(seed: PendingMemberSeed) {
   try {
-    await adminAuth(`admin/users/${seed.userId}`, { method: "DELETE" });
-  } finally {
-    await adminRest(`sentinel_invitation_reservations?id=eq.${seed.reservationId}`, { method: "DELETE" });
+    await cleanupPendingMember(seed);
+  } catch (error) {
+    console.error(`[members.spec] cleanup failed for ${seed.email}:`, error);
   }
 }
 
@@ -227,7 +263,7 @@ test.describe("manager member management", () => {
       // Now that the auth user is ours (created directly via the Admin API rather than
       // through a real invite), we can and do delete it: the sentinel_members row cascades
       // on auth.users delete, and the reservation row is deleted explicitly.
-      await cleanupPendingMember(seed);
+      await cleanupPendingMemberQuietly(seed);
     }
   });
 
@@ -238,17 +274,30 @@ test.describe("manager member management", () => {
     const managers = self.body as { user_id: string }[];
     test.skip(managers.length !== 1, "guard only applies with exactly one active manager");
 
-    const refusal = await callRpc(token, "sentinel_set_member_role", {
-      p_workspace_id: workspaceId,
-      p_user_id: managers[0].user_id,
-      p_role: "analyst",
-    });
+    const managerId = managers[0].user_id;
+    try {
+      const refusal = await callRpc(token, "sentinel_set_member_role", {
+        p_workspace_id: workspaceId,
+        p_user_id: managerId,
+        p_role: "analyst",
+      });
 
-    expect(refusal.status).toBe(400);
-    expect(refusal.body.message).toMatch(/at least one manager/i);
+      expect(refusal.status).toBe(400);
+      expect(refusal.body.message).toMatch(/at least one manager/i);
 
-    const after = await rest(token, `sentinel_manager_roster?select=role&user_id=eq.${managers[0].user_id}`);
-    expect(after.body[0].role).toBe("manager");
+      const after = await rest(token, `sentinel_manager_roster?select=role&user_id=eq.${managerId}`);
+      expect(after.body[0]?.role).toBe("manager");
+    } finally {
+      // Insurance, not an expectation: if the last-manager guard in
+      // sentinel_set_member_role ever regresses and actually demotes the sole manager, the
+      // workspace becomes irrecoverable (nobody left who can invite or activate). Restore
+      // the role directly via the service role so a regression here surfaces as a red test
+      // instead of bricking the shared workspace for every other spec.
+      await adminRest(`sentinel_members?workspace_id=eq.${workspaceId}&user_id=eq.${managerId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ role: "manager" }),
+      });
+    }
   });
 
   test("rejects a pending invitation and frees the address for re-invitation", async ({ page }) => {
@@ -279,7 +328,7 @@ test.describe("manager member management", () => {
       const reservation = await adminRest(`sentinel_invitation_reservations?select=status&id=eq.${seed.reservationId}`);
       expect(reservation.body[0].status).toBe("failed");
     } finally {
-      await cleanupPendingMember(seed);
+      await cleanupPendingMemberQuietly(seed);
     }
   });
 });

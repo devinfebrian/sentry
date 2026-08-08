@@ -79,6 +79,13 @@ begin
     raise exception 'Obsolete direct-update membership policy still exists';
   end if;
 
+  -- service_role already holds UPDATE on every reservation column (including status),
+  -- so DELETE is required for test/ops cleanup to actually remove a seeded reservation row
+  -- instead of silently 403ing.
+  if not has_table_privilege('service_role', 'public.sentinel_invitation_reservations', 'DELETE') then
+    raise exception 'service_role must hold DELETE on sentinel_invitation_reservations';
+  end if;
+
   raise notice 'sentinel member management verified';
 end;
 $$;

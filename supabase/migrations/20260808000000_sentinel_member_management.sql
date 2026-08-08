@@ -237,3 +237,9 @@ grant execute on function public.sentinel_reject_invitation(uuid, uuid) to authe
 revoke update (role, status) on table public.sentinel_members from authenticated;
 
 drop policy if exists "sentinel memberships are manageable by managers" on public.sentinel_members;
+
+-- service_role can already UPDATE any reservation to any status (see the grant in
+-- 20260806145323_sentinel_invitation_reservations.sql), so DELETE adds no meaningful
+-- surface beyond that -- it just lets test/ops tooling actually remove a reservation row
+-- instead of silently 403ing (42501) on every attempt.
+grant delete on table public.sentinel_invitation_reservations to service_role;
