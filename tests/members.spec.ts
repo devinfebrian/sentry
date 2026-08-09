@@ -377,6 +377,26 @@ test.describe("workspace identity and activity", () => {
     expect(roster.body, "the manager roster must stay empty for an analyst").toEqual([]);
   });
 
+  test("the activity log shows recorded events with real names", async ({ page }) => {
+    // Nine event types have been written since the foundation migration and none of them
+    // were ever displayed. This is the first time the audit trail is readable.
+    const token = await openWorkspace(page);
+    const events = await rest(token, "sentinel_activity_events?select=event_type&limit=1");
+    test.skip(events.body.length === 0, "workspace has no recorded activity yet");
+
+    await page.goto("/activity");
+    await expect(page.getByRole("heading", { name: "Activity log" })).toBeVisible();
+
+    const rows = page.getByRole("listitem");
+    await expect(rows.first()).toBeVisible({ timeout: 30_000 });
+
+    // Actors resolve to display names, so no raw UUID should reach the page.
+    const feed = await page.getByRole("list").first().innerText();
+    expect(feed).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+    // And the nav entry that could never highlight now can.
+    await expect(page.getByRole("button", { name: "Activity log" })).toHaveAttribute("aria-current", "page");
+  });
+
   test("renaming yourself changes only your own row", async ({ page }) => {
     const token = await openWorkspace(page);
     const selfId = subjectOf(token);

@@ -11,7 +11,9 @@ import { EvidenceLedger } from "../components/evidence/EvidenceLedger";
 import { FindingPanel } from "../components/evidence/FindingPanel";
 import { DecisionRecord as DecisionRecordComponent } from "../components/decisions/DecisionRecord";
 import { UploadStatusPanel } from "../components/cases/UploadStatusPanel";
-import type { AgentStage, CaseSummary, DecisionRecord as DecisionRecordData, EvidenceRecord, Finding, SentinelInvestigationService, SentinelUploadService } from "../domain/types";
+import { CaseActivityPanel } from "../components/cases/CaseActivityPanel";
+import type { MemberNameLookup } from "../services/memberNames";
+import type { AgentStage, CaseSummary, DecisionRecord as DecisionRecordData, EvidenceRecord, Finding, SentinelActivityService, SentinelInvestigationService, SentinelUploadService } from "../domain/types";
 
 const stepCopy: Record<string, { eyebrow: string; title: string; description: string }> = {
   summary: { eyebrow: "Case workspace / summary", title: "Investigation summary", description: "Review current agent progress, risk signals, and the next accountable action." },
@@ -32,6 +34,8 @@ export interface CaseWorkspaceDemoData {
 export interface CaseWorkspacePageProps {
   investigationService?: Pick<SentinelInvestigationService, "getById"> | null;
   uploadService?: Pick<SentinelUploadService, "getLatestForInvestigation" | "getStatus" | "listRows" | "retryParsing"> | null;
+  activityService?: SentinelActivityService | null;
+  memberNames?: MemberNameLookup | null;
   demoData?: CaseWorkspaceDemoData;
 }
 
@@ -44,7 +48,7 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Try again to reload this persisted investigation.";
 }
 
-export function CaseWorkspacePage({ investigationService, uploadService, demoData }: CaseWorkspacePageProps) {
+export function CaseWorkspacePage({ investigationService, uploadService, activityService, memberNames, demoData }: CaseWorkspacePageProps) {
   const { caseId = "", step = "summary" } = useParams();
   const [retryKey, setRetryKey] = useState(0);
   const [state, setState] = useState<LoadState>(() => demoData
@@ -122,6 +126,13 @@ export function CaseWorkspacePage({ investigationService, uploadService, demoDat
                 reported, separately, rather than letting one imply the other. */}
             {step === "summary" && <UploadStatusPanel investigationId={caseItem.databaseId} uploadService={uploadService} />}
             <AnalysisNotStartedState step={step} />
+            {step === "summary" && (
+              <CaseActivityPanel
+                investigationId={caseItem.databaseId}
+                activityService={activityService}
+                memberNames={memberNames}
+              />
+            )}
           </>
         )}
       </div>
