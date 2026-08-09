@@ -284,17 +284,26 @@ describe("parse-upload processing route", () => {
       event_type: "parse-started",
       metadata: { status: "processing", upload_id: uploadId },
     }));
-    // Analysis follows the parse in the same request.
+    // Every agent goes on the board, so the pipeline shows the whole sequence rather than
+    // materialising stages as they happen to start.
+    expect(fake.rpc).toHaveBeenCalledWith("sentinel_seed_agent_runs", expect.objectContaining({
+      p_upload_id: uploadId,
+      p_agent_keys: ["deterministic", "fraud-pattern"],
+    }));
+    // The deterministic rules follow the parse in the same request, scoped to their own key
+    // so they cannot clear another producer's findings.
     expect(fake.rpc).toHaveBeenCalledWith("sentinel_record_analysis", expect.objectContaining({
       p_upload_id: uploadId,
       p_workspace_id: workspaceId,
       p_investigation_id: investigationId,
+      p_agent_key: "deterministic",
     }));
   });
 
-  it("still reports a successful parse when the analysis fails", async () => {
+  it("reports a successful parse and records the failure when the analysis fails", async () => {
     // The rows are the product; the findings are a reading of them. Losing the reading
     // must not lose the rows, or a transient analysis fault would look like a parse fault.
+    // It must not lose the reading silently either — the failure lands on the agent's run.
     spreadsheetMock.read.mockReturnValue({ SheetNames: ["Ledger"], Sheets: { Ledger: {} } });
     spreadsheetMock.utils.sheet_to_json.mockReturnValue([
       ["Entity", "Amount"],
@@ -314,7 +323,12 @@ describe("parse-upload processing route", () => {
 
     expect(response.status).toBe(200);
     expect(await body(response)).toEqual({ uploadId, status: "parsed", rowCount: 2, warnings: [] });
-    expect(fake.rpc).toHaveBeenCalledWith("sentinel_record_analysis", expect.any(Object));
+    // The old behaviour swallowed this into a console warning, which left the pipeline
+    // showing a stage that never moved. A reader now gets a reason and a retry.
+    expect(fake.rpc).toHaveBeenCalledWith("sentinel_fail_analysis", expect.objectContaining({
+      p_agent_key: "deterministic",
+      p_reason: expect.any(String),
+    }));
   });
 
   it("fails parse through transaction RPC without REST row cleanup", async () => {

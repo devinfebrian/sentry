@@ -1,5 +1,4 @@
 import type { ParsedImport, ParsedImportRow } from "../_shared/parser.ts";
-import type { AnalysisFinding } from "../_shared/analysis.ts";
 import type { SupabaseClientLike } from "../_shared/auth.ts";
 
 export const processingLeaseMs = 15 * 60 * 1000;
@@ -217,39 +216,8 @@ export async function completeParse(
   );
 }
 
-export class AnalysisRecordError extends Error {
-  constructor() {
-    super("Unable to record analysis.");
-    this.name = "AnalysisRecordError";
-  }
-}
-
-/**
- * Persists the findings for an upload, replacing any previous run.
- *
- * Deliberately not part of completeParse: the rows are the product, the analysis is a
- * reading of them. If this fails the parse still succeeded and the caller keeps its
- * result — analysis can be re-run against the persisted rows at any time.
- */
-export async function recordAnalysis(
-  admin: SupabaseClientLike,
-  upload: Pick<UploadRecord, "id" | "workspace_id" | "investigation_id">,
-  findings: AnalysisFinding[],
-  actorId?: string,
-) {
-  return callParserRpc<{ findingCount: number; evidenceCount: number }>(
-    admin,
-    "sentinel_record_analysis",
-    {
-      p_upload_id: upload.id,
-      p_workspace_id: upload.workspace_id,
-      p_investigation_id: upload.investigation_id,
-      p_findings: findings,
-      p_actor_id: actorId ?? null,
-    },
-    new AnalysisRecordError(),
-  );
-}
+// Recording analysis moved to _shared/analysisRuns.ts when analysis became multi-producer:
+// it is no longer the parser's concern, and analyze-upload needs the same calls.
 
 export async function reconcileParseEvent(
   admin: SupabaseClientLike,
