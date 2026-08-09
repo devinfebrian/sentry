@@ -121,6 +121,11 @@ export interface ActivityEntry {
   occurredAt: string;
 }
 
+/** Findings and their evidence for one investigation, read together. */
+export interface SentinelAnalysisService {
+  list(investigationId: string, limit?: number): Promise<{ findings: Finding[]; evidence: EvidenceRecord[] }>;
+}
+
 export interface SentinelActivityService {
   list(options?: { investigationId?: string; limit?: number }): Promise<ActivityEntry[]>;
 }

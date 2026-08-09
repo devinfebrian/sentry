@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, Navigate, useParams } from "react-router-dom";
 import { AnalysisNotStartedState } from "../components/cases/AnalysisNotStartedState";
+import { AnalysisUnavailableState } from "../components/cases/AnalysisUnavailableState";
 import { CaseHeader } from "../components/cases/CaseHeader";
 import { AgentPipeline } from "../components/operations/AgentPipeline";
 import { StatusBadge } from "../components/ui/StatusBadge";
@@ -13,7 +14,8 @@ import { DecisionRecord as DecisionRecordComponent } from "../components/decisio
 import { UploadStatusPanel } from "../components/cases/UploadStatusPanel";
 import { CaseActivityPanel } from "../components/cases/CaseActivityPanel";
 import type { MemberNameLookup } from "../services/memberNames";
-import type { AgentStage, CaseSummary, DecisionRecord as DecisionRecordData, EvidenceRecord, Finding, SentinelActivityService, SentinelInvestigationService, SentinelUploadService } from "../domain/types";
+import { useCaseAnalysis } from "./useCaseAnalysis";
+import type { AgentStage, CaseSummary, DecisionRecord as DecisionRecordData, EvidenceRecord, Finding, SentinelActivityService, SentinelAnalysisService, SentinelInvestigationService, SentinelUploadService } from "../domain/types";
 
 const stepCopy: Record<string, { eyebrow: string; title: string; description: string }> = {
   summary: { eyebrow: "Case workspace / summary", title: "Investigation summary", description: "Review current agent progress, risk signals, and the next accountable action." },
@@ -35,6 +37,7 @@ export interface CaseWorkspacePageProps {
   investigationService?: Pick<SentinelInvestigationService, "getById"> | null;
   uploadService?: Pick<SentinelUploadService, "getLatestForInvestigation" | "getStatus" | "listRows" | "retryParsing"> | null;
   activityService?: SentinelActivityService | null;
+  analysisService?: SentinelAnalysisService | null;
   memberNames?: MemberNameLookup | null;
   demoData?: CaseWorkspaceDemoData;
 }
@@ -48,7 +51,7 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Try again to reload this persisted investigation.";
 }
 
-export function CaseWorkspacePage({ investigationService, uploadService, activityService, memberNames, demoData }: CaseWorkspacePageProps) {
+export function CaseWorkspacePage({ investigationService, uploadService, activityService, analysisService, memberNames, demoData }: CaseWorkspacePageProps) {
   const { caseId = "", step = "summary" } = useParams();
   const [retryKey, setRetryKey] = useState(0);
   const [state, setState] = useState<LoadState>(() => demoData
@@ -91,6 +94,7 @@ export function CaseWorkspacePage({ investigationService, uploadService, activit
   }, [caseId, demoData, investigationService, retryKey]);
 
   const retry = () => setRetryKey((current) => current + 1);
+  const analysis = useCaseAnalysis(demoData ? undefined : state.status === "ready" ? state.caseItem?.databaseId : undefined, analysisService);
 
   if (state.status === "loading") return <LoadingState label="Loading case" />;
 
@@ -105,6 +109,13 @@ export function CaseWorkspacePage({ investigationService, uploadService, activit
 
   const content = stepCopy[step];
   if (!content) return <Navigate to={`/cases/${caseItem.id}/summary`} replace />;
+
+  const analysisFindings = analysis.status === "ready" ? analysis.findings : [];
+  const analysisEvidence = analysis.status === "ready" ? analysis.evidence : [];
+  const hasFindings = analysisFindings.length > 0;
+  // A failed read is not an absence of findings. Only the findings and evidence steps
+  // read analysis at all, so only they can report its failure.
+  const analysisFailed = analysis.status === "error" && (step === "findings" || step === "evidence");
 
   const findings = demoData?.findings.filter((finding) => finding.caseId === caseItem.id) ?? [];
   return (
@@ -122,10 +133,30 @@ export function CaseWorkspacePage({ investigationService, uploadService, activit
           </>
         ) : (
           <>
-            {/* Source data is real once parsed; agent output still is not. Both are
-                reported, separately, rather than letting one imply the other. */}
+            {/* Source data is real once parsed; the rest of the pipeline still is not.
+                Each part reports itself, rather than letting one imply the others. */}
             {step === "summary" && <UploadStatusPanel investigationId={caseItem.databaseId} uploadService={uploadService} />}
-            <AnalysisNotStartedState step={step} />
+
+            {step === "findings" && hasFindings && (
+              <section className="finding-list">
+                {analysisFindings.map((finding) => (
+                  <FindingPanel finding={finding} evidence={analysisEvidence} key={finding.id} />
+                ))}
+              </section>
+            )}
+            {step === "evidence" && hasFindings && (
+              // No caseId: the query already scoped these to this investigation, and the
+              // ledger's own filter matches on reference, which these records do not carry.
+              <EvidenceLedger records={analysisEvidence} />
+            )}
+
+            {analysisFailed && <AnalysisUnavailableState />}
+
+            {/* Still true wherever analysis produced nothing — a clean import genuinely
+                has no findings, and the other steps have no implementation at all. */}
+            {!analysisFailed && !(hasFindings && (step === "findings" || step === "evidence")) && (
+              <AnalysisNotStartedState step={step} />
+            )}
             {step === "summary" && (
               <CaseActivityPanel
                 investigationId={caseItem.databaseId}

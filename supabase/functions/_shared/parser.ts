@@ -46,7 +46,8 @@ export class SpreadsheetParseError extends Error {
   }
 }
 
-const valueHeaderPattern = /(amount|value|total|debit|credit|balance|transaction|cost|price)/i;
+/** Exported so analysis picks the money column the same way the parser validated it. */
+export const valueHeaderPattern = /(amount|value|total|debit|credit|balance|transaction|cost|price)/i;
 
 export function normalizeHeader(value: unknown) {
   return String(value ?? "")

@@ -128,6 +128,41 @@ test.describe("analyst workspace", () => {
     expect(anonymousResponse.ok, "original upload must require an authenticated session").toBe(false);
   });
 
+  test("analyses an import and shows the findings with their evidence", async ({ page }) => {
+    test.slow(); // Upload, parse, analysis, and three page loads.
+    const dialog = await openImportDialog(page);
+
+    await dialog.getByLabel("Financial data file").setInputFiles(fixturePath("sentinel-findings.csv"));
+    await dialog.getByLabel("Investigation name").fill(`Analysis Walkthrough ${Date.now().toString(36)}`);
+    await dialog.getByRole("button", { name: "Import data" }).click();
+
+    await page.waitForURL(/\/cases\/INV-[A-Z0-9]+\/summary/, { timeout: 60_000 });
+    const reference = new URL(page.url()).pathname.split("/")[2];
+
+    // Wait for the panels themselves. Asserting the absence of "Analysis not started"
+    // passes on a page that has not rendered yet, which once reported zero findings
+    // against a database holding three.
+    await page.goto(`/cases/${reference}/findings`);
+    const panels = page.locator(".finding-panel");
+    await expect(panels).toHaveCount(3, { timeout: 60_000 });
+    await expect(page.getByRole("heading", { name: /analysis not started/i })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: /analysis could not be loaded/i })).toHaveCount(0);
+
+    // One assertion per rule: each states an observation about the fixture's rows.
+    await expect(panels.filter({ hasText: "2 rows record 2,500 for Northwind Traders" })).toHaveCount(1);
+    await expect(panels.filter({ hasText: /Whale Holdings records 25,000, 10x the median/ })).toHaveCount(1);
+    await expect(panels.filter({ hasText: "1 row has no amount recorded" })).toHaveCount(1);
+
+    // Evidence points back at the source rows, including the median row as context.
+    await page.goto(`/cases/${reference}/evidence`);
+    await expect(page.getByRole("row").filter({ hasText: "Row 11 — Whale Holdings" })).toHaveCount(1);
+    await expect(page.getByRole("row").filter({ hasText: "Median amount across this import" })).toHaveCount(1);
+    await expect(page.getByRole("row").filter({ hasText: "Row 12 — Ghost Vendor" })).toHaveCount(1);
+
+    await page.goto("/activity");
+    await expect(page.getByText(/analysis completed/i).first()).toBeVisible({ timeout: 30_000 });
+  });
+
   test("rejects an unsupported file extension with a readable error", async ({ page }) => {
     const dialog = await openImportDialog(page);
 
@@ -302,6 +337,8 @@ test.describe("unauthenticated access", () => {
       "sentinel_activity_events",
       "sentinel_manager_roster",
       "sentinel_invitation_reservations",
+      "sentinel_findings",
+      "sentinel_evidence",
     ];
 
     for (const object of objects) {

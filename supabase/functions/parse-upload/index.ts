@@ -2,6 +2,7 @@ import { createAdminClient, requireUser, type SupabaseClientLike } from "../_sha
 import { isActiveMembership, parseUploadRequest, PolicyError } from "../_shared/auth-policy.ts";
 import { environmentAllowedOrigins, errorResponse, handleCors, HttpError, jsonResponse, readJson } from "../_shared/cors.ts";
 import { deduplicateRows, parseWorkbook } from "../_shared/parser.ts";
+import { analyseRows } from "../_shared/analysis.ts";
 import XLSX from "./spreadsheet.ts";
 import {
   claimUploadForParsing,
@@ -11,6 +12,7 @@ import {
   ParseCompletionEventError,
   ProcessingLeaseLostError,
   reconcileParseEvent,
+  recordAnalysis,
   type UploadRecord,
 } from "./processing.ts";
 
@@ -159,6 +161,16 @@ async function parseAuthorizedUpload(request: Request, uploadId: string, session
     const parsed = parseWorkbook(await file.arrayBuffer(), XLSX);
     const rows = deduplicateRows(parsed.rows);
     await completeParse(admin, claimedUpload, parsed, rows, user.id);
+
+    // Analysis reads what the parse produced, so a failure here costs findings, never
+    // rows. The upload is already parsed and the caller must be told so; analyze-upload
+    // re-runs this against the persisted rows.
+    try {
+      await recordAnalysis(admin, claimedUpload, analyseRows(parsed.headers, rows), user.id);
+    } catch {
+      console.warn(`Analysis failed for upload ${upload.id}; the parse itself succeeded.`);
+    }
+
     return statusResponse(upload.id, "parsed", request, { row_count: rows.length, warnings: parsed.warnings });
   } catch (error) {
     if (error instanceof ParseCompletionEventError) {
