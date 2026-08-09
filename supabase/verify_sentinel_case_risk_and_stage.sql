@@ -30,14 +30,20 @@ begin
     raise exception 'sentinel_findings.severity must be constrained to low/medium/high';
   end if;
 
+  -- Matches the shape, not just the word: the column list must place severity right
+  -- after confidence, and the values list must carry the matching nullif(...) entry in
+  -- the same position. A bare '%severity%' check would pass on a comment mentioning the
+  -- word, or on a column added in the wrong ordinal position — silent misalignment that
+  -- writes the wrong value into the wrong column, which is exactly what this guards against.
   if not exists (
     select 1 from pg_proc as proc
     join pg_namespace as ns on ns.oid = proc.pronamespace
     where ns.nspname = 'public' and proc.proname = 'sentinel_record_analysis'
       and oidvectortypes(proc.proargtypes) = 'uuid, uuid, uuid, text, jsonb, uuid'
-      and pg_get_functiondef(proc.oid) like '%severity%'
+      and pg_get_functiondef(proc.oid) like '%confidence, severity%'
+      and pg_get_functiondef(proc.oid) like '%nullif(finding ->> ''severity'', '''')%'
   ) then
-    raise exception 'sentinel_record_analysis must persist severity';
+    raise exception 'sentinel_record_analysis must persist severity in the correct column position';
   end if;
 
   if not exists (
@@ -67,9 +73,13 @@ begin
     raise exception 'fraud-pattern findings were rated without the agent stating a severity: %', rated_fraud;
   end if;
 
+  -- 'not in' evaluates to NULL (not true) for a NULL stage or risk, so a NULL would
+  -- silently pass this check without the explicit "is null" arms below — exactly the
+  -- regression this assertion exists to catch.
   if exists (
     select 1 from public.sentinel_investigation_queue
-    where stage not in ('awaiting-import', 'analysing', 'analysis-failed',
+    where stage is null or risk is null
+       or stage not in ('awaiting-import', 'analysing', 'analysis-failed',
                         'awaiting-analysis', 'fraud-review', 'analysed')
        or risk not in ('low', 'medium', 'high', 'not-assessed')
   ) then

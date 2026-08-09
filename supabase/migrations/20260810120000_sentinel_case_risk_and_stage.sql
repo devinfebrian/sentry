@@ -15,7 +15,7 @@ comment on column public.sentinel_findings.severity is
   'How much the finding matters, as opposed to confidence, which is whether it is real. Null means no producer rated it.';
 
 /**
- * Persists one producer's findings (and their evidence) for one upload, and completes
+ * Replaces one producer's analysis for one upload in a single transaction, and completes
  * that producer's run in the same breath — findings, run status, and the audit event
  * cannot disagree with each other because nothing can land between them.
  *
@@ -143,7 +143,11 @@ $function$;
 update public.sentinel_findings as f
 set severity = case f.rule
     when 'duplicate-amount' then
-      case when evidence.count >= 3 then 'high' else 'medium' end
+      case
+        when (select count(*) from public.sentinel_evidence as e
+              where e.finding_id = f.id and e.relevance = 'supporting') >= 3
+        then 'high' else 'medium'
+      end
     when 'outlier-amount' then
       case
         when substring(f.summary from '([0-9]+)x the median') is null then null
@@ -151,18 +155,21 @@ set severity = case f.rule
         else 'medium'
       end
     when 'missing-amount' then
+      -- Denominator is the upload's full parsed row_count, not a row cap. That is correct
+      -- for the pre-agent findings this backfill rates, which came from the old inline pass
+      -- that read every persisted row. A future re-run through analyze-upload divides by at
+      -- most ANALYSIS_ROW_LIMIT (10,000) instead, so the two can diverge above 10,000 rows —
+      -- that divergence does not apply to the rows being rated here.
       case
         when coalesce(upload.row_count, 0) = 0 then null
-        when evidence.count::numeric / upload.row_count >= 0.1 then 'medium'
+        when (select count(*) from public.sentinel_evidence as e
+              where e.finding_id = f.id and e.relevance = 'supporting')::numeric
+             / upload.row_count >= 0.1
+        then 'medium'
         else 'low'
       end
   end
-from public.sentinel_uploads as upload,
-  lateral (
-    select count(*) as count
-    from public.sentinel_evidence as e
-    where e.finding_id = f.id and e.relevance = 'supporting'
-  ) as evidence
+from public.sentinel_uploads as upload
 where upload.id = f.upload_id
   and f.severity is null
   and f.agent_key = 'deterministic';
@@ -203,7 +210,7 @@ select
   -- seeds them, so a case opened during a parse sits in exactly that gap. Phrased the other
   -- way it would match nothing until 'analysed' and claim to be finished.
   case
-    when pipeline.uploads = 0 then 'awaiting-import'
+    when pipeline.uploads is null or pipeline.uploads = 0 then 'awaiting-import'
     when pipeline.running > 0 then 'analysing'
     when pipeline.failed > 0 then 'analysis-failed'
     when pipeline.awaiting_deterministic > 0 then 'awaiting-analysis'
