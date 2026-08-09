@@ -114,8 +114,12 @@ test.describe("analyst workspace", () => {
     await page.goto(`/cases/${reference}/summary`);
     await expect(page.getByText("3 records imported")).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText("Northwind Traders").first()).toBeVisible();
-    // Agent output genuinely has not run, and must still say so.
-    await expect(page.getByRole("heading", { name: /analysis not started/i })).toBeVisible();
+    // This used to assert "Analysis not started", which stopped being true when the parse
+    // began seeding agent runs. The half that still matters is the AI agent: it is seeded,
+    // nothing has asked it to run, and the pipeline has to say so rather than imply work.
+    await expect(page.getByRole("heading", { name: "Agent pipeline" })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("listitem").filter({ hasText: "Fraud pattern investigator" }))
+      .toContainText("Waiting");
 
     // The original file must not be readable without authentication.
     const publicResponse = await fetch(`${supabaseUrl}/storage/v1/object/public/sentinel-imports/${upload.storage_path}`);
@@ -161,6 +165,82 @@ test.describe("analyst workspace", () => {
 
     await page.goto("/activity");
     await expect(page.getByText(/analysis completed/i).first()).toBeVisible({ timeout: 30_000 });
+  });
+
+  test("shows the agent pipeline and re-runs a finished agent without disturbing its findings", async ({ page }) => {
+    test.slow(); // Upload, parse, run seeding, and a second analysis pass.
+    const dialog = await openImportDialog(page);
+
+    await dialog.getByLabel("Financial data file").setInputFiles(fixturePath("sentinel-findings.csv"));
+    await dialog.getByLabel("Investigation name").fill(`Pipeline Walkthrough ${Date.now().toString(36)}`);
+    await dialog.getByRole("button", { name: "Import data" }).click();
+
+    await page.waitForURL(/\/cases\/INV-[A-Z0-9]+\/summary/, { timeout: 60_000 });
+    const reference = new URL(page.url()).pathname.split("/")[2];
+
+    const investigations = await api(page, `sentinel_investigations?select=id&reference=eq.${reference}`);
+    const investigationId = investigations.body[0].id;
+
+    // Wait on the API, then navigate once. Polling the DOM with reload() spins: count() does
+    // not auto-wait, so each iteration re-navigated before React had rendered the previous
+    // one and read zero forever.
+    await expect.poll(async () => {
+      const runs = await api(page, `sentinel_agent_runs?select=agent_key&investigation_id=eq.${investigationId}`);
+      return Array.isArray(runs.body) ? runs.body.length : 0;
+    }, { timeout: 90_000, message: "the parse seeds one run per agent" }).toBe(2);
+
+    await page.goto(`/cases/${reference}/summary`);
+    await expect(page.getByRole("heading", { name: "Agent pipeline" })).toBeVisible({ timeout: 30_000 });
+
+    const stages = page.getByRole("listitem");
+    await expect(stages.filter({ hasText: "Financial analysis" })).toContainText("Complete");
+    // Seeded, seen, and untouched: nothing runs a model without being asked.
+    await expect(stages.filter({ hasText: "Fraud pattern investigator" })).toContainText("Waiting");
+    await expect(page.getByRole("button", { name: /^run fraud pattern investigator$/i })).toBeVisible();
+
+    async function findingRules(agentKey: string) {
+      const response = await api(
+        page,
+        `sentinel_findings?select=rule&investigation_id=eq.${investigationId}&agent_key=eq.${agentKey}`,
+      );
+      return (response.body as { rule: string }[]).map((row) => row.rule).sort();
+    }
+
+    const before = await findingRules("deterministic");
+    expect(before).toEqual(["duplicate-amount", "missing-amount", "outlier-amount"]);
+
+    /**
+     * The capability the agent-scoped delete exists for. A completed stage rendered no
+     * action at all until now, which put re-running an agent out of reach from the
+     * interface even though the database supported it.
+     *
+     * Driven through the deterministic agent on purpose: it exercises the same
+     * analyze-upload path, CORS included, with no model call, no quota, and no chance of a
+     * provider outage making this test flake.
+     */
+    const runAgain = page.getByRole("button", { name: /run financial analysis again/i });
+    await expect(runAgain).toBeVisible();
+    await runAgain.click();
+    await expect(runAgain).toBeEnabled({ timeout: 60_000 });
+
+    // Replaced, not duplicated, and no other producer's work touched.
+    await expect.poll(async () => (await findingRules("deterministic")).length, {
+      timeout: 30_000,
+      message: "re-run replaces the deterministic findings rather than accumulating them",
+    }).toBe(3);
+    expect(await findingRules("deterministic")).toEqual(before);
+    expect(await findingRules("fraud-pattern")).toEqual([]);
+
+    // One run row per producer per upload, updated in place by the re-run.
+    const runs = await api(
+      page,
+      `sentinel_agent_runs?select=agent_key,status,output_count&investigation_id=eq.${investigationId}`,
+    );
+    const byAgent = (runs.body as { agent_key: string; status: string; output_count: number }[])
+      .sort((left, right) => left.agent_key.localeCompare(right.agent_key));
+    expect(byAgent).toHaveLength(2);
+    expect(byAgent[0]).toMatchObject({ agent_key: "deterministic", status: "complete", output_count: 3 });
+    expect(byAgent[1]).toMatchObject({ agent_key: "fraud-pattern", status: "waiting" });
   });
 
   test("rejects an unsupported file extension with a readable error", async ({ page }) => {
@@ -339,6 +419,7 @@ test.describe("unauthenticated access", () => {
       "sentinel_invitation_reservations",
       "sentinel_findings",
       "sentinel_evidence",
+      "sentinel_agent_runs",
     ];
 
     for (const object of objects) {
