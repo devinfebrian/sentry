@@ -54,7 +54,7 @@ function importDialog(page: Page) {
 async function openImportDialog(page: Page) {
   await page.goto("/");
   await page.getByRole("heading", { name: "Overview" }).waitFor();
-  await page.getByRole("button", { name: "Import data" }).first().click();
+  await page.getByRole("button", { name: "New investigation" }).first().click();
   const dialog = importDialog(page);
   await expect(dialog).toBeVisible();
   return dialog;

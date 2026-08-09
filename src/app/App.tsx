@@ -87,11 +87,11 @@ function WorkspaceLayout() {
     return outcome;
   };
 
-  const handleImported = async (file: File, preview: ImportPreview): Promise<ImportOutcome> => {
+  const handleImported = async (file: File, entity: string): Promise<ImportOutcome> => {
     if (!importWorkflow || !workspaceId) {
       throw new Error("Unable to import data: active workspace connection is unavailable. Sign in again and retry.");
     }
-    return announce(await importWorkflow.run({ file, preview }));
+    return announce(await importWorkflow.run({ file, entity }));
   };
 
   const activeImportButtonRef = location.pathname === "/cases" ? casesImportButtonRef : overviewImportButtonRef;

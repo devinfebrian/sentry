@@ -85,6 +85,47 @@ describe("ImportDialog", () => {
     expect(onImported).not.toHaveBeenCalled();
   });
 
+  it("prefills the investigation name from the first previewed row", async () => {
+    previewImportMock.mockResolvedValue(preview);
+    const user = userEvent.setup();
+    render(<ImportDialog open onClose={vi.fn()} onImported={vi.fn(async () => acceptedImport)} />);
+
+    await user.upload(screen.getByLabelText(/financial data file/i), new File(["data"], "ledger.csv", { type: "text/csv" }));
+
+    expect(await screen.findByLabelText(/investigation name/i)).toHaveValue("Entity 1");
+  });
+
+  it("sends the name the analyst typed, not the one from the file", async () => {
+    // The whole point: row 1 is a default, not a rule.
+    previewImportMock.mockResolvedValue(preview);
+    const onImported = vi.fn(async () => acceptedImport);
+    const user = userEvent.setup();
+    const file = new File(["data"], "ledger.csv", { type: "text/csv" });
+    render(<ImportDialog open onClose={vi.fn()} onImported={onImported} />);
+
+    await user.upload(screen.getByLabelText(/financial data file/i), file);
+    const name = await screen.findByLabelText(/investigation name/i);
+    await user.clear(name);
+    await user.type(name, "Northwind Traders");
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: /import data/i }));
+
+    expect(onImported).toHaveBeenCalledWith(file, "Northwind Traders");
+  });
+
+  it("refuses a blank name without starting an import", async () => {
+    previewImportMock.mockResolvedValue(preview);
+    const onImported = vi.fn(async () => acceptedImport);
+    const user = userEvent.setup();
+    render(<ImportDialog open onClose={vi.fn()} onImported={onImported} />);
+
+    await user.upload(screen.getByLabelText(/financial data file/i), new File(["data"], "ledger.csv", { type: "text/csv" }));
+    await user.clear(await screen.findByLabelText(/investigation name/i));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: /import data/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/name this investigation/i);
+    expect(onImported).not.toHaveBeenCalled();
+  });
+
   it("awaits async import before closing and returning focus", async () => {
     previewImportMock.mockResolvedValue(preview);
     let resolveImport!: () => void;
@@ -104,7 +145,8 @@ describe("ImportDialog", () => {
       await user.upload(screen.getByLabelText(/financial data file/i), file);
       await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: /import data/i }));
 
-      expect(onImported).toHaveBeenCalledWith(file, preview);
+      // The dialog now sends the name, not the preview — prefilled from the first row.
+      expect(onImported).toHaveBeenCalledWith(file, "Entity 1");
       expect(screen.getByRole("dialog")).toBeInTheDocument();
       expect(returnButton).not.toHaveFocus();
 

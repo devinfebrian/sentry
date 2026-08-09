@@ -72,7 +72,7 @@ export function CasesPage({ investigationService, onImportData, importButtonRef,
     <div className="cases-page">
       <header className="page-heading page-heading-simple">
         <div><span className="eyebrow">Workspace / investigations</span><h1>Cases</h1><p>Prioritize investigations by risk, stage, and the next review action.</p></div>
-        <div className="page-actions"><Button variant="primary">New investigation</Button><Button ref={importButtonRef} variant="secondary" onClick={onImportData}>Import data</Button></div>
+        <div className="page-actions"><Button ref={importButtonRef} variant="primary" onClick={onImportData}>New investigation</Button></div>
       </header>
       {state.status === "loading" && <LoadingState label="Loading cases" />}
       {state.status === "error" && <ErrorState title="Cases unavailable" description={errorMessage(state.error)} action={<Button variant="secondary" onClick={retry}>Retry</Button>} />}

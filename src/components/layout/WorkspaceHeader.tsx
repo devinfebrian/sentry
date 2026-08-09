@@ -33,10 +33,11 @@ export const WorkspaceHeader = forwardRef<HTMLButtonElement, WorkspaceHeaderProp
         <span>FinAI / workspace</span>
       </div>
       <div className="workspace-tools">
-        <button className="header-tool" type="button">Search <kbd>/</kbd></button>
-        <button className="header-tool header-tool-secondary" type="button">Help</button>
-        {/* Not a button: there is no profile screen to open, and a control that looks
-            interactive and does nothing is the same class of untruth as the name was. */}
+        {/* Search and Help lived here and did nothing — Search even advertised a "/"
+            shortcut that was never wired. Offering them back means building them.
+            Not a button either: there is no profile screen to open, and a control that
+            looks interactive and does nothing is the same class of untruth as the
+            hardcoded name was. */}
         <span className="profile-button" aria-label={`Signed in as ${user?.email ?? name}`}>
           <span className="profile-initials" aria-hidden="true">{initials}</span>
           <span className="profile-name">{name}</span>

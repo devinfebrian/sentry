@@ -1,5 +1,5 @@
 import type { SentinelInvestigationService, SentinelUploadService, UploadParserResult } from "../domain/types";
-import type { ImportPreview } from "./importParser";
+
 import type { SentinelUploadRecovery } from "./sentinelUploads";
 
 export interface ImportAccepted {
@@ -26,7 +26,7 @@ export interface ImportFailed {
 export type ImportOutcome = ImportAccepted | ImportFailed;
 
 export interface ImportWorkflow {
-  run(input: { file: File; preview: ImportPreview }): Promise<ImportOutcome>;
+  run(input: { file: File; entity: string }): Promise<ImportOutcome>;
 }
 
 export interface ImportWorkflowDependencies {
@@ -111,10 +111,12 @@ export function createImportWorkflow({
   };
 
   return {
-    async run({ file, preview }) {
-      const entity = preview.rows[0]?.entity.trim();
+    async run({ file, entity: requestedEntity }) {
+      // The caller names the investigation. This used to be taken silently from the first
+      // previewed row, which meant nobody could name their own case.
+      const entity = requestedEntity.trim();
       if (!entity) {
-        throw new Error("Unable to create investigation: preview contains no entity.");
+        throw new Error("Unable to create investigation: no entity was given.");
       }
 
       const investigation = await investigations.create({ entity, ownerId });

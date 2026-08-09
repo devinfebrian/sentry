@@ -134,7 +134,7 @@ describe("App", () => {
 
   it("rejects unsupported imports with recovery text", async () => {
     renderAuthenticatedApp();
-    await userEvent.click(screen.getByRole("button", { name: /import data/i }));
+    await userEvent.click(screen.getByRole("button", { name: /new investigation/i }));
     const file = new File(["data"], "notes.txt", { type: "text/plain" });
     await userEvent.upload(screen.getByLabelText(/financial data file/i), file, { applyAccept: false });
     expect(await screen.findByRole("alert")).toHaveTextContent(/csv, xls, or xlsx/i);
@@ -176,7 +176,7 @@ describe("App", () => {
     );
     expect(createUploadServiceMock).toHaveBeenCalledWith(fakeSupabase, { workspaceId: "test-workspace", userId: "test-user" });
 
-    await user.click(screen.getByRole("button", { name: /import data/i }));
+    await user.click(screen.getByRole("button", { name: /new investigation/i }));
     await user.upload(screen.getByLabelText(/financial data file/i), file);
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: /import data/i }));
 
@@ -188,7 +188,9 @@ describe("App", () => {
     expect(investigationCreateMock.mock.invocationCallOrder[0]).toBeLessThan(createUploadMock.mock.invocationCallOrder[0]);
     expect(createUploadMock.mock.invocationCallOrder[0]).toBeLessThan(startParsingMock.mock.invocationCallOrder[0]);
     expect(window.location.pathname).toBe(`/cases/${investigation.id}/summary`);
-    expect(screen.getByRole("main")).toHaveFocus();
+    // AppShell moves focus to main inside requestAnimationFrame on a route change, so a
+    // synchronous assertion here raced the frame and failed intermittently.
+    await waitFor(() => expect(screen.getByRole("main")).toHaveFocus());
   });
 
   it.each(["/evidence", "/reports", "/operations"])("does not expose fixture module at %s in production routes", async (path) => {
@@ -232,7 +234,7 @@ describe("App", () => {
     const file = new File(["entity,amount\nImported Company,1200"], "ledger.csv", { type: "text/csv" });
 
     renderAuthenticatedApp();
-    await user.click(screen.getByRole("button", { name: /import data/i }));
+    await user.click(screen.getByRole("button", { name: /new investigation/i }));
     await user.upload(screen.getByLabelText(/financial data file/i), file);
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: /import data/i }));
 
@@ -282,7 +284,7 @@ describe("App", () => {
     const file = new File(["entity,amount\nImported Company,1200"], "ledger.csv", { type: "text/csv" });
 
     renderAuthenticatedApp();
-    await user.click(screen.getByRole("button", { name: /import data/i }));
+    await user.click(screen.getByRole("button", { name: /new investigation/i }));
     await user.upload(screen.getByLabelText(/financial data file/i), file);
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: /import data/i }));
 
@@ -311,7 +313,7 @@ describe("App", () => {
     window.history.pushState({}, "", "/cases");
     renderAuthenticatedApp();
     const user = userEvent.setup();
-    const trigger = screen.getByRole("button", { name: /import data/i });
+    const trigger = screen.getByRole("button", { name: /new investigation/i });
 
     await user.click(trigger);
     await user.click(screen.getByRole("button", { name: /cancel/i }));

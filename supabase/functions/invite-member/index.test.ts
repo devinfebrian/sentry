@@ -305,6 +305,57 @@ describe("invite-member idempotency", () => {
     expect(calls.indexOf("reservation-update:member-1")).toBeLessThan(calls.indexOf("membership"));
   });
 
+  it("says someone is already a member rather than calling them pending", async () => {
+    // Telling a manager to wait for an acceptance that happened months ago sends them
+    // looking for a problem that does not exist.
+    const reservation: Reservation = {
+      id: "reservation-1",
+      workspace_id: "workspace-1",
+      email: "analyst@example.com",
+      auth_user_id: "analyst-1",
+      invited_by: "manager-1",
+      status: "reserved",
+      updated_at: new Date().toISOString(),
+    };
+    const admin = adminClient({
+      reservation,
+      reservationInsertError: { code: "23505" },
+      pending: { workspace_id: "workspace-1", user_id: "analyst-1", role: "analyst", status: "active", invited_email: "analyst@example.com" },
+    });
+    authMocks.requireUser.mockResolvedValue({ client: userClient(), user: { id: "manager-1", email: "manager@example.com" } });
+    authMocks.createAdminClient.mockResolvedValue(admin);
+
+    const response = await handleRequest(request());
+
+    expect(response.status).toBe(409);
+    expect(await responseBody(response)).toEqual({ error: "That person is already an active member of this workspace." });
+    expect(admin.auth.admin.inviteUserByEmail).not.toHaveBeenCalled();
+  });
+
+  it("still calls a genuinely pending invitation pending", async () => {
+    const reservation: Reservation = {
+      id: "reservation-1",
+      workspace_id: "workspace-1",
+      email: "analyst@example.com",
+      auth_user_id: "analyst-1",
+      invited_by: "manager-1",
+      status: "reserved",
+      updated_at: new Date().toISOString(),
+    };
+    const admin = adminClient({
+      reservation,
+      reservationInsertError: { code: "23505" },
+      pending: { workspace_id: "workspace-1", user_id: "analyst-1", role: "analyst", status: "pending", invited_email: "analyst@example.com" },
+    });
+    authMocks.requireUser.mockResolvedValue({ client: userClient(), user: { id: "manager-1", email: "manager@example.com" } });
+    authMocks.createAdminClient.mockResolvedValue(admin);
+
+    const response = await handleRequest(request());
+
+    expect(response.status).toBe(409);
+    expect(await responseBody(response)).toEqual({ error: "Invitation already pending." });
+  });
+
   it("loads reservation after unique conflict without sending another Auth invite", async () => {
     const reservation: Reservation = {
       id: "reservation-1",
