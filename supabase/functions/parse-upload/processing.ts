@@ -216,6 +216,9 @@ export async function completeParse(
   );
 }
 
+// Recording analysis moved to _shared/analysisRuns.ts when analysis became multi-producer:
+// it is no longer the parser's concern, and analyze-upload needs the same calls.
+
 export async function reconcileParseEvent(
   admin: SupabaseClientLike,
   upload: UploadRecord,

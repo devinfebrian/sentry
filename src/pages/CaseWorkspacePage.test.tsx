@@ -22,7 +22,7 @@ const importedCase: CaseSummary = {
 function renderWorkspace(
   service: Pick<SentinelInvestigationService, "getById">,
   step = "summary",
-  props: { demoData?: ComponentProps<typeof CaseWorkspacePage>["demoData"] } = {},
+  props: Partial<ComponentProps<typeof CaseWorkspacePage>> = {},
 ) {
   const initialCaseId = props.demoData?.cases[0]?.id ?? "INV-IMPORTED1";
   return render(
@@ -33,6 +33,79 @@ function renderWorkspace(
     </MemoryRouter>,
   );
 }
+
+const analysisWith = (findings: unknown[], evidence: unknown[] = []) => ({
+  list: vi.fn(async () => ({ findings, evidence })),
+}) as unknown as ComponentProps<typeof CaseWorkspacePage>["analysisService"];
+
+const realFinding = {
+  id: "finding-1",
+  caseId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  agent: "Financial analysis",
+  summary: "2 rows record 250 for Acme",
+  confidence: 1,
+  evidenceIds: ["evidence-1"],
+  contradictoryEvidenceIds: [],
+};
+
+const realEvidence = {
+  id: "evidence-1",
+  caseId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  source: "Row 2 — Acme",
+  claim: "amount = 250",
+  agent: "Financial analysis",
+  confidence: 1,
+  state: "unreviewed" as const,
+  timestamp: "2026-08-09T09:00:00.000Z",
+  relevance: "supporting" as const,
+};
+
+describe("CaseWorkspacePage analysis", () => {
+  const service = { getById: vi.fn(async () => importedCase) };
+
+  it("renders a real finding on the findings step", async () => {
+    renderWorkspace(service, "findings", { analysisService: analysisWith([realFinding], [realEvidence]) });
+
+    expect(await screen.findByText("2 rows record 250 for Acme")).toBeInTheDocument();
+    expect(screen.getByText("Financial analysis")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /analysis not started/i })).not.toBeInTheDocument();
+  });
+
+  it("renders the real evidence ledger on the evidence step", async () => {
+    renderWorkspace(service, "evidence", { analysisService: analysisWith([realFinding], [realEvidence]) });
+
+    expect(await screen.findByText("Row 2 — Acme")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /analysis not started/i })).not.toBeInTheDocument();
+  });
+
+  it("still says analysis not started when a clean import produced none", async () => {
+    // The common case. An empty result is a legitimate outcome, not an error.
+    renderWorkspace(service, "findings", { analysisService: analysisWith([]) });
+
+    expect(await screen.findByRole("heading", { name: /analysis not started/i })).toBeInTheDocument();
+  });
+
+  it("leaves the steps that have no implementation alone", async () => {
+    renderWorkspace(service, "decision", { analysisService: analysisWith([realFinding], [realEvidence]) });
+
+    expect(await screen.findByRole("heading", { name: /analysis not started/i })).toBeInTheDocument();
+  });
+
+  it("says the analysis could not be loaded rather than that none was started", async () => {
+    // A failed read is not an absence of findings. Reporting it as "not started" hid a
+    // broken query behind a plausible-looking empty state for an entire slice.
+    const failing = {
+      list: vi.fn(async () => {
+        throw new Error("Unable to load analysis: boom");
+      }),
+    } as unknown as ComponentProps<typeof CaseWorkspacePage>["analysisService"];
+
+    renderWorkspace(service, "findings", { analysisService: failing });
+
+    expect(await screen.findByRole("heading", { name: /analysis could not be loaded/i })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /analysis not started/i })).not.toBeInTheDocument();
+  });
+});
 
 describe("CaseWorkspacePage", () => {
   it.each(["summary", "findings", "evidence", "decision", "report"])(

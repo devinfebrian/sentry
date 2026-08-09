@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 import type { CaseSummary, UploadParserResult } from "../domain/types";
-import type { ImportPreview } from "./importParser";
 import { createImportWorkflow, type ImportFailed, type ImportOutcome } from "./importWorkflow";
 import { SentinelUploadRecoveryError } from "./sentinelUploads";
 
@@ -8,11 +7,7 @@ const investigation = { id: "INV-1", databaseId: "db-inv-1" } as CaseSummary;
 const upload = { id: "upload-1" };
 const file = new File(["Entity,Amount\nNorthstar,50"], "ledger.csv", { type: "text/csv" });
 
-const preview: ImportPreview = {
-  headers: ["entity", "amount"],
-  rows: [{ entity: " Northstar ", values: { entity: "Northstar", amount: 50 }, sourceRow: 2 }],
-  warnings: [],
-};
+const entity = "Northstar";
 
 function makeWorkflow(overrides: {
   create?: ReturnType<typeof vi.fn>;
@@ -47,13 +42,15 @@ function expectFailed(outcome: ImportOutcome): ImportFailed {
 }
 
 describe("createImportWorkflow", () => {
-  it("creates the investigation from the first previewed entity, then uploads, then parses", async () => {
+  it("names the investigation from the caller, then uploads, then parses", async () => {
     const { workflow, create, createUpload, startParsing } = makeWorkflow();
 
-    const outcome = await workflow.run({ file, preview });
+    // A name the file could not have supplied: the workflow used to read the first
+    // previewed row, so nobody could name their own case.
+    const outcome = await workflow.run({ file, entity: "Renamed By Analyst" });
 
     expect(outcome).toEqual({ status: "parsed", investigationId: "INV-1", uploadId: "upload-1" });
-    expect(create).toHaveBeenCalledWith({ entity: "Northstar", ownerId: "user-1" });
+    expect(create).toHaveBeenCalledWith({ entity: "Renamed By Analyst", ownerId: "user-1" });
     expect(createUpload).toHaveBeenCalledWith({ investigationId: "db-inv-1", file });
     expect(create.mock.invocationCallOrder[0]).toBeLessThan(createUpload.mock.invocationCallOrder[0]);
     expect(createUpload.mock.invocationCallOrder[0]).toBeLessThan(startParsing.mock.invocationCallOrder[0]);
@@ -64,14 +61,22 @@ describe("createImportWorkflow", () => {
       startParsing: vi.fn().mockResolvedValue({ uploadId: upload.id, status: "processing" }),
     });
 
-    expect(await workflow.run({ file, preview })).toMatchObject({ status: "processing" });
+    expect(await workflow.run({ file, entity })).toMatchObject({ status: "processing" });
   });
 
-  it("refuses a preview with no entity before creating anything", async () => {
+  it("refuses a blank entity before creating anything", async () => {
     const { workflow, create } = makeWorkflow();
 
-    await expect(workflow.run({ file, preview: { ...preview, rows: [] } })).rejects.toThrow(/no entity/i);
+    await expect(workflow.run({ file, entity: "   " })).rejects.toThrow(/no entity/i);
     expect(create).not.toHaveBeenCalled();
+  });
+
+  it("trims the name it is given", async () => {
+    const { workflow, create } = makeWorkflow();
+
+    await workflow.run({ file, entity: "  Northwind Traders  " });
+
+    expect(create).toHaveBeenCalledWith({ entity: "Northwind Traders", ownerId: "user-1" });
   });
 
   it("refuses to upload against an investigation with no database id", async () => {
@@ -79,7 +84,7 @@ describe("createImportWorkflow", () => {
       create: vi.fn().mockResolvedValue({ ...investigation, databaseId: undefined }),
     });
 
-    await expect(workflow.run({ file, preview })).rejects.toThrow(/database id is missing/i);
+    await expect(workflow.run({ file, entity })).rejects.toThrow(/database id is missing/i);
     expect(createUpload).not.toHaveBeenCalled();
   });
 
@@ -88,7 +93,7 @@ describe("createImportWorkflow", () => {
       startParsing: vi.fn().mockResolvedValue({ uploadId: upload.id, status: "failed", errorMessage: "Header row missing." }),
     });
 
-    expect(expectFailed(await workflow.run({ file, preview }))).toMatchObject({
+    expect(expectFailed(await workflow.run({ file, entity }))).toMatchObject({
       status: "failed",
       uploadId: "upload-1",
       errorMessage: "Header row missing.",
@@ -100,7 +105,7 @@ describe("createImportWorkflow", () => {
       startParsing: vi.fn().mockResolvedValue({ uploadId: upload.id, status: "failed" }),
     });
 
-    expect(expectFailed(await workflow.run({ file, preview })).errorMessage).toMatch(/retry this upload/i);
+    expect(expectFailed(await workflow.run({ file, entity })).errorMessage).toMatch(/retry this upload/i);
   });
 
   it("turns a thrown parser error into a retryable failure rather than rejecting", async () => {
@@ -108,7 +113,7 @@ describe("createImportWorkflow", () => {
       startParsing: vi.fn().mockRejectedValue(new Error("Unable to start parsing: edge function down")),
     });
 
-    expect(expectFailed(await workflow.run({ file, preview })).errorMessage).toMatch(/edge function down/i);
+    expect(expectFailed(await workflow.run({ file, entity })).errorMessage).toMatch(/edge function down/i);
   });
 
   it("retries parsing against the existing upload without creating a second investigation", async () => {
@@ -116,7 +121,7 @@ describe("createImportWorkflow", () => {
       startParsing: vi.fn().mockResolvedValue({ uploadId: upload.id, status: "failed", errorMessage: "Parser failed." }),
     });
 
-    const retried = await expectFailed(await workflow.run({ file, preview })).retry();
+    const retried = await expectFailed(await workflow.run({ file, entity })).retry();
 
     expect(retried).toMatchObject({ status: "parsed", investigationId: "INV-1", uploadId: "upload-1" });
     expect(retryParsing).toHaveBeenCalledWith("upload-1");
@@ -132,7 +137,7 @@ describe("createImportWorkflow", () => {
         .mockResolvedValue({ uploadId: upload.id, status: "parsed" }),
     });
 
-    const first = expectFailed(await workflow.run({ file, preview }));
+    const first = expectFailed(await workflow.run({ file, entity }));
     const second = expectFailed(await first.retry());
 
     expect(second.errorMessage).toBe("Still failing.");
@@ -151,7 +156,7 @@ describe("createImportWorkflow", () => {
       })),
     });
 
-    const failure = expectFailed(await workflow.run({ file, preview }));
+    const failure = expectFailed(await workflow.run({ file, entity }));
 
     expect(failure).toMatchObject({
       investigationId: "INV-1",
@@ -179,7 +184,7 @@ describe("createImportWorkflow", () => {
       startParsing: vi.fn().mockResolvedValue({ uploadId: upload.id, status: "failed", errorMessage: "Parser failed." }),
     });
 
-    const retried = expectFailed(await expectFailed(await workflow.run({ file, preview })).retry());
+    const retried = expectFailed(await expectFailed(await workflow.run({ file, entity })).retry());
 
     expect(retried.retryLabel).toBe("Retry upload and parsing");
   });
@@ -189,7 +194,7 @@ describe("createImportWorkflow", () => {
       createUpload: vi.fn().mockRejectedValue(new Error("Unable to create upload: row level security")),
     });
 
-    await expect(workflow.run({ file, preview })).rejects.toThrow(/row level security/i);
+    await expect(workflow.run({ file, entity })).rejects.toThrow(/row level security/i);
   });
 
   it("rethrows a recovery that belongs to a different investigation", async () => {
@@ -202,6 +207,6 @@ describe("createImportWorkflow", () => {
       })),
     });
 
-    await expect(workflow.run({ file, preview })).rejects.toThrow(/storage denied/i);
+    await expect(workflow.run({ file, entity })).rejects.toThrow(/storage denied/i);
   });
 });

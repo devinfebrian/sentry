@@ -23,8 +23,32 @@ Two rules, both learned the hard way — this has now happened twice:
    `version` equals the repo filename prefix, then confirm with `list_migrations`. Touch
    only `schema_migrations` — never the schema itself, which is already correct.
 
-Repaired this way for `20260808000000` and again for `20260809000000`. Repo and ledger are
-currently 1:1 across all ten migrations; keep them that way.
+Repaired this way for `20260808000000` and again for `20260809000000`.
+
+A third option, used for `20260809145307` and simpler where the migration is new and
+unpushed: **rename the repo file to the stamped version** instead of rewriting the ledger.
+It reaches the same 1:1 state without touching `schema_migrations` at all. Prefer it unless
+the filename is already referenced somewhere.
+
+Repo and ledger are currently 1:1 across all twelve migrations; keep them that way.
+
+## Deploying Edge Functions — editing the source does not ship it
+
+`supabase/functions/**` is **not** deployed by anything in the normal loop. `npx vitest`
+imports the local modules, so a function's tests can be entirely green while the live Deno
+runtime serves a build months old. Three slices of changes accumulated undeployed before
+anyone noticed, and the symptom was not an error — it was a feature quietly doing nothing.
+
+- Check with `list_edge_functions` and compare `updated_at` against the last source change.
+- Deploy with `deploy_edge_function`, inlining **every file in the import graph**
+  (`_shared/*` included). A partial file list fails with `Entrypoint path does not exist`.
+- File names must keep their `functions/<name>/…` prefixes, matching what
+  `get_edge_function` returns.
+
+`parse-upload` is at v7 and current. **`invite-member` is still at v6 (Aug 6)** and is
+missing the `display_name` seeding and the active-member message — both merged, tested, and
+not live. Deploy it before trusting either through the real function; the display-name work
+was only ever verified through the service-role seeding path.
 
 ## Should fix soon
 
@@ -139,6 +163,34 @@ syncs role once per session key. Self-corrects on token refresh, and the new
 - **The feed re-reads the roster per mount.** The lookup is cached per service instance, so
   it is one query per page rather than per read — but nothing invalidates it after a rename
   except a full remount. `MemberNameLookup.invalidate()` exists and has no caller.
+
+## From the analysis slice
+
+- **`analyze-upload` was never built.** Analysis runs inline in `parse-upload`; there is no
+  way to re-run it against an already-parsed upload. If the inline call fails it is logged
+  and swallowed, so those findings are simply lost until the file is re-imported. This was
+  the one deliberately deferred piece of the slice.
+- **PostgREST embeds must name the relationship.** This schema gives every child table both
+  a plain FK and a composite workspace-scoped one, which makes every embed ambiguous
+  (`PGRST201`). `sentinelAnalysis.ts` names `sentinel_evidence_workspace_finding_fkey`
+  explicitly. Any future embed needs the same treatment — and note that **no unit test can
+  catch this**, because the structural fake does not model relationship resolution. It
+  surfaced only in the live e2e.
+- **A failed analysis read used to render as "Analysis not started".** Fixed with
+  `AnalysisUnavailableState`, but the shape of the bug is worth remembering: an error path
+  that falls back to an empty success state hides itself perfectly. `useCaseAnalysis` still
+  returns an empty ready state when no service is supplied, which is correct for the demo
+  route but is the same shape.
+- **Assertions of absence pass on a page that has not rendered.** The first walkthrough
+  reported zero findings against a database holding three, because
+  `expect(...).toHaveCount(0)` is satisfied instantly by an empty DOM. Wait for something
+  positive first.
+- **Analysis re-runs are unbounded in the read.** `sentinel_record_analysis` deletes prior
+  findings per upload, so re-running is idempotent — but an investigation with many uploads
+  accumulates findings, and the read caps at `DEFAULT_FINDING_LIMIT = 100` with no paging.
+- **Risk and stage are still hardcoded.** The case queue says "Not assessed" even for a case
+  with three findings. Deriving them from findings is the natural next slice and would also
+  revive the two withheld filters.
 
 ## Closed since triage
 

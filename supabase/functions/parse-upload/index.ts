@@ -1,7 +1,10 @@
 import { createAdminClient, requireUser, type SupabaseClientLike } from "../_shared/auth.ts";
 import { isActiveMembership, parseUploadRequest, PolicyError } from "../_shared/auth-policy.ts";
 import { environmentAllowedOrigins, errorResponse, handleCors, HttpError, jsonResponse, readJson } from "../_shared/cors.ts";
-import { deduplicateRows, parseWorkbook } from "../_shared/parser.ts";
+import { deduplicateRows, parseWorkbook, type ParsedImportRow } from "../_shared/parser.ts";
+import { analyseRows } from "../_shared/analysis.ts";
+import { ORDERED_AGENT_KEYS } from "../_shared/agentKeys.ts";
+import { failAnalysis, recordAnalysis, seedAgentRuns, startAgentRun } from "../_shared/analysisRuns.ts";
 import XLSX from "./spreadsheet.ts";
 import {
   claimUploadForParsing,
@@ -72,6 +75,47 @@ async function currentStateResponse(admin: SupabaseClientLike, upload: UploadRec
     return failedResponse(upload.id, request);
   }
   return statusResponse(upload.id, "processing", request);
+}
+
+/**
+ * Puts every agent on the board and runs the deterministic one.
+ *
+ * The rows are the product; the analysis is a reading of them. A failure here therefore
+ * never fails the parse — but it no longer disappears either. It lands on the agent's run
+ * row with a reason, where the pipeline shows it and a retry can pick it up. That is the
+ * difference from the swallowed `catch` this replaces: the outcome is the same for the
+ * upload, and no longer invisible to the analyst.
+ *
+ * The deterministic rules run here rather than through analyze-upload because the rows are
+ * already in memory and parse-upload holds no credential that would satisfy analyze-upload's
+ * membership check. The AI agents stay `waiting` until something asks for them.
+ */
+async function runDeterministicAnalysis(
+  admin: SupabaseClientLike,
+  upload: UploadRecord,
+  headers: string[],
+  rows: ParsedImportRow[],
+  actorId: string,
+) {
+  try {
+    await seedAgentRuns(admin, upload, ORDERED_AGENT_KEYS);
+    await startAgentRun(admin, upload, "deterministic", rows.length);
+    await recordAnalysis(admin, upload, "deterministic", analyseRows(headers, rows), actorId);
+  } catch {
+    try {
+      await failAnalysis(
+        admin,
+        upload,
+        "deterministic",
+        "The deterministic rules did not finish for this upload. You can retry this agent.",
+        actorId,
+      );
+    } catch {
+      // Nothing left to record the failure with. The parse still succeeded and the caller
+      // is told so; the run row stays where it was rather than claiming a false outcome.
+      console.warn(`Analysis state could not be recorded for upload ${upload.id}.`);
+    }
+  }
 }
 
 async function parseAuthorizedUpload(request: Request, uploadId: string, session: Awaited<ReturnType<typeof requireUser>>) {
@@ -159,6 +203,9 @@ async function parseAuthorizedUpload(request: Request, uploadId: string, session
     const parsed = parseWorkbook(await file.arrayBuffer(), XLSX);
     const rows = deduplicateRows(parsed.rows);
     await completeParse(admin, claimedUpload, parsed, rows, user.id);
+
+    await runDeterministicAnalysis(admin, claimedUpload, parsed.headers, rows, user.id);
+
     return statusResponse(upload.id, "parsed", request, { row_count: rows.length, warnings: parsed.warnings });
   } catch (error) {
     if (error instanceof ParseCompletionEventError) {

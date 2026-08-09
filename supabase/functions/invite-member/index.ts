@@ -5,6 +5,16 @@ import { environmentAllowedOrigins, errorResponse, handleCors, HttpError, jsonRe
 const allowedOrigins = environmentAllowedOrigins();
 const genericInviteError = "Unable to invite member.";
 const invitationPendingError = "Invitation already pending.";
+const alreadyMemberError = "That person is already an active member of this workspace.";
+
+/**
+ * A membership that already exists is not always a pending invitation — it is often
+ * someone who accepted long ago. Telling a manager to wait for an acceptance that already
+ * happened sends them looking for a problem that does not exist.
+ */
+function existingMemberError(status: string | undefined) {
+  return status === "active" ? alreadyMemberError : invitationPendingError;
+}
 export const RESERVATION_LEASE_MS = 15 * 60 * 1000;
 const AUTH_USERS_PAGE_SIZE = 100;
 const reservationFields = "id, workspace_id, email, auth_user_id, invited_by, status, updated_at";
@@ -296,7 +306,7 @@ export async function handleRequest(request: Request) {
         }
       }
 
-      return errorResponse(invitationPendingError, 409, request, allowedOrigins);
+      return errorResponse(existingMemberError(existingMembership?.status), 409, request, allowedOrigins);
     }
 
     if (created) {
@@ -331,7 +341,7 @@ export async function handleRequest(request: Request) {
     if (existingMembership) {
       reservation = await updateReservation(admin, reservation.id, { status: "completed" }, "reserved", reservation.updated_at);
       await reconcileInvitationEvent(client, admin, membership.workspace_id, user.id, existingMembership.user_id);
-      return errorResponse(invitationPendingError, 409, request, allowedOrigins);
+      return errorResponse(existingMemberError(existingMembership.status), 409, request, allowedOrigins);
     }
 
     const { error: memberError } = await admin.from("sentinel_members").insert({

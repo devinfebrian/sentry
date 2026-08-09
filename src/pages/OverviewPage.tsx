@@ -95,9 +95,10 @@ export function OverviewPage({ onImportData, importButtonRef, investigationServi
           <h1>Overview</h1>
           <p>Review work in motion, resolve evidence gaps, and move decisions forward.</p>
         </div>
+        {/* One button: the dialog now names the investigation as well as importing its
+            data, so a separate "Import data" would open the same thing. */}
         <div className="page-actions">
-          <Button variant="primary">New investigation</Button>
-          <Button ref={importButtonRef} variant="secondary" onClick={onImportData}>Import data</Button>
+          <Button ref={importButtonRef} variant="primary" onClick={onImportData}>New investigation</Button>
         </div>
       </header>
 

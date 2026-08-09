@@ -669,6 +669,22 @@ kbd {
   justify-self: start;
 }
 
+.agent-pipeline-empty {
+  padding: 16px 0 4px;
+  color: var(--color-slate);
+  font: var(--text-body);
+}
+
+/* Matches .agent-stage-failure: a failed action reads the same wherever it is reported. */
+.agent-pipeline-action-error {
+  margin-bottom: 16px;
+  padding: 9px 10px;
+  border-left: 2px solid var(--color-risk);
+  background: var(--color-red-wash);
+  color: var(--color-risk);
+  font: var(--text-caption);
+}
+
 .agent-pipeline-summary .agent-stage {
   min-height: 194px;
 }

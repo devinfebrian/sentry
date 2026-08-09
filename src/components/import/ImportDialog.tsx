@@ -7,7 +7,7 @@ import { Button } from "../ui/Button";
 interface ImportDialogProps {
   open: boolean;
   onClose: () => void;
-  onImported: (file: File, preview: ImportPreview) => Promise<ImportOutcome>;
+  onImported: (file: File, entity: string) => Promise<ImportOutcome>;
   returnFocusRef?: React.RefObject<HTMLElement | null>;
 }
 
@@ -24,6 +24,7 @@ export function ImportDialog({ open, onClose, onImported, returnFocusRef }: Impo
   const previewControllerRef = useRef<AbortController | null>(null);
   const previewRequestIdRef = useRef(0);
   const [selection, setSelection] = useState<Selection | null>(null);
+  const [entity, setEntity] = useState("");
   const [error, setError] = useState("");
   const [phase, setPhase] = useState<Phase>("idle");
   const [failure, setFailure] = useState<ImportFailed | null>(null);
@@ -50,6 +51,7 @@ export function ImportDialog({ open, onClose, onImported, returnFocusRef }: Impo
       return;
     }
     setSelection(null);
+    setEntity("");
     setError("");
     setFailure(null);
     window.requestAnimationFrame(() => inputRef.current?.focus());
@@ -110,6 +112,9 @@ export function ImportDialog({ open, onClose, onImported, returnFocusRef }: Impo
       const preview = await previewImport(file, { signal: controller.signal });
       if (requestId !== previewRequestIdRef.current || controller.signal.aborted) return;
       setSelection({ file, preview });
+      // The first row used to become the investigation name silently. It is still the
+      // default, but now as a prefilled value the analyst can see and change.
+      setEntity((current) => current.trim() || preview.rows[0]?.entity.trim() || "");
     } catch (caught) {
       if (requestId !== previewRequestIdRef.current || controller.signal.aborted) return;
       setSelection(null);
@@ -148,11 +153,15 @@ export function ImportDialog({ open, onClose, onImported, returnFocusRef }: Impo
       setError((current) => current || "Choose a CSV or spreadsheet file before importing.");
       return;
     }
+    if (!entity.trim()) {
+      setError("Name this investigation before importing.");
+      return;
+    }
 
     setPhase("importing");
     setError("");
     try {
-      settle(await onImported(selection.file, selection.preview));
+      settle(await onImported(selection.file, entity.trim()));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to import selected financial data.");
     } finally {
@@ -179,7 +188,18 @@ export function ImportDialog({ open, onClose, onImported, returnFocusRef }: Impo
         <button className="drawer-close" type="button" onClick={close} disabled={busy}>Close</button>
         <span className="section-kicker">New investigation / data intake</span>
         <h2 id="import-dialog-title">Import financial data</h2>
-        <p>Select a CSV or spreadsheet. FinAI reads the first worksheet and previews normalized rows before creating a case.</p>
+        <p>Name the investigation and select a CSV or spreadsheet. FinAI reads the first worksheet and previews normalized rows before creating a case.</p>
+        <label className="import-file-label" htmlFor="investigation-entity">Investigation name</label>
+        <input
+          id="investigation-entity"
+          name="entity"
+          type="text"
+          autoComplete="off"
+          placeholder="Entity under investigation"
+          value={entity}
+          disabled={busy}
+          onChange={(event) => setEntity(event.target.value)}
+        />
         <label className="import-file-label" htmlFor="financial-data-file">Financial data file</label>
         <input ref={inputRef} id="financial-data-file" type="file" accept=".csv,.xlsx,.xls" disabled={busy} onChange={(event) => void handleFile(event.target.files?.[0])} />
         {reading && <div className="loading-state" role="status" aria-live="polite">Previewing first worksheet</div>}

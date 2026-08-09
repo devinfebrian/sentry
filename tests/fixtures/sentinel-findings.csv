@@ -1,0 +1,12 @@
+Entity,Amount,Reference
+Northwind Traders,2500.00,INV-2001
+Northwind Traders,2500.00,INV-2002
+Contoso Supplies,2400.00,INV-2003
+Fabrikam Logistics,2600.00,INV-2004
+Adventure Works,2550.00,INV-2005
+Tailspin Toys,2450.00,INV-2006
+Wide World Importers,2480.00,INV-2007
+Litware Inc,2520.00,INV-2008
+Proseware Ltd,2530.00,INV-2009
+Whale Holdings,25000.00,INV-2010
+Ghost Vendor,0,INV-2011

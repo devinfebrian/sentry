@@ -74,8 +74,10 @@ export function CaseQueue({ cases }: CaseQueueProps) {
           <input id="case-search" type="search" value={query} onChange={(event) => updateParam("query", event.target.value)} placeholder="Entity, case ID, or owner" />
         </div>
         <div className="queue-filters">
-          <div className="filter-field"><label htmlFor="risk-filter">Risk</label><select id="risk-filter" value={risk} onChange={(event) => updateParam("risk", event.target.value)}><option value="all">All risk</option><option value="high">High risk</option><option value="medium">Medium risk</option><option value="low">Low risk</option><option value="not-assessed">Not assessed</option></select></div>
-          <div className="filter-field"><label htmlFor="stage-filter">Stage</label><select id="stage-filter" value={stage} onChange={(event) => updateParam("stage", event.target.value)}><option value="all">All stages</option>{Object.entries(stageLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></div>
+          {/* Risk and Stage filters are withheld until analysis produces more than one
+              value. Every row is currently not-assessed / not-started, so both could only
+              ever return everything or nothing. The columns stay — "Not assessed" is true.
+              The URL params are still honoured, so a saved link keeps working. */}
           <div className="filter-field"><label htmlFor="owner-filter">Owner</label><select id="owner-filter" value={owner} onChange={(event) => updateParam("owner", event.target.value)}><option value="all">All owners</option>{owners.map((item) => <option value={item} key={item}>{item}</option>)}</select></div>
         </div>
       </div>

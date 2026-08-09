@@ -7,7 +7,12 @@ function readSource(relativePath: string) {
 }
 
 describe("production fixture boundary", () => {
-  it.each(["../pages/OverviewPage.tsx", "../pages/CasesPage.tsx", "../pages/CaseWorkspacePage.tsx"])(
+  it.each([
+    "../pages/OverviewPage.tsx",
+    "../pages/CasesPage.tsx",
+    "../pages/CaseWorkspacePage.tsx",
+    "../pages/OperationsPage.tsx",
+  ])(
     "keeps fixture data out of %s",
     (pagePath) => {
       expect(readSource(pagePath)).not.toMatch(/(?:from|import)\s*["'][^"']*fixtures["']/);
@@ -19,6 +24,13 @@ describe("production fixture boundary", () => {
 
     expect(appSource).toMatch(/import\.meta\.env\.DEV/);
     expect(appSource).toMatch(/import\(["']\.\.\/demo\/DemoRoutes["']\)/);
-    expect(appSource).not.toMatch(/from\s+["']\.\.\/pages\/(?:EvidencePage|ReportsPage|OperationsPage)["']/);
+    /**
+     * This previously froze the path `../pages/OperationsPage`, which the fixture-backed
+     * pages occupied before they moved under demo/. A real, fixture-free page lives there
+     * now, so the guard checks the property it was always about: App.tsx reaches demo/ only
+     * through the dynamic DEV import above, never through a static one that would bundle
+     * fixtures into production.
+     */
+    expect(appSource).not.toMatch(/from\s+["'][^"']*\/demo\//);
   });
 });

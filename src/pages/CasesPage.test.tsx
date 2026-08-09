@@ -56,6 +56,20 @@ describe("CasesPage", () => {
     expect(await screen.findByRole("link", { name: /imported company/i })).toBeInTheDocument();
   });
 
+  it("opens the new investigation dialog from the page action", async () => {
+    // This button rendered with no onClick until now — the primary action on the page did
+    // nothing when clicked.
+    const onImportData = vi.fn();
+    const service = serviceWithList(async () => [importedCase]);
+
+    render(<MemoryRouter><CasesPage investigationService={service} onImportData={onImportData} /></MemoryRouter>);
+
+    await screen.findByRole("table");
+    await userEvent.click(screen.getByRole("button", { name: /new investigation/i }));
+
+    expect(onImportData).toHaveBeenCalledTimes(1);
+  });
+
   it("shows an import next action when no persisted cases exist", async () => {
     const onImportData = vi.fn();
     const service = serviceWithList(async () => []);

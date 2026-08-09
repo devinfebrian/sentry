@@ -121,8 +121,41 @@ export interface ActivityEntry {
   occurredAt: string;
 }
 
+/** Findings and their evidence for one investigation, read together. */
+export interface SentinelAnalysisService {
+  list(investigationId: string, limit?: number): Promise<{ findings: Finding[]; evidence: EvidenceRecord[] }>;
+}
+
 export interface SentinelActivityService {
   list(options?: { investigationId?: string; limit?: number }): Promise<ActivityEntry[]>;
+}
+
+/**
+ * The statuses a run can actually be in.
+ *
+ * A narrower set than AgentStatus: `review` and `blocked` are states the design spec
+ * describes but nothing in the system produces yet, and claiming them would be decoration.
+ */
+export type AgentRunStatus = "waiting" | "running" | "complete" | "failed";
+
+/** One producer's run against one upload. */
+export interface AgentRun {
+  id: string;
+  uploadId: string;
+  agentKey: string;
+  status: AgentRunStatus;
+  failureReason?: string;
+  inputCount: number;
+  outputCount: number;
+  startedAt?: string;
+  completedAt?: string;
+}
+
+export interface SentinelAgentRunService {
+  /** Runs for one investigation, or every run in the workspace when omitted. */
+  list(investigationId?: string): Promise<AgentRun[]>;
+  /** Re-runs one agent against one upload. Resolves when the run has finished. */
+  run(uploadId: string, agentKey: string): Promise<void>;
 }
 
 /** Fixture-only: the decision history rendered on a case, not the workspace activity feed. */

@@ -55,6 +55,16 @@ describe("WorkspaceHeader", () => {
     expect(screen.getByLabelText("Signed in as manager@sentinel.com")).toBeInTheDocument();
   });
 
+  it("offers no controls that do nothing", () => {
+    // Search even advertised a "/" shortcut that was never wired.
+    renderHeader("manager@sentinel.com");
+
+    expect(screen.queryByRole("button", { name: /search/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /help/i })).not.toBeInTheDocument();
+    // The identity is a label, not a button — there is no profile screen to open.
+    expect(screen.queryByRole("button", { name: /signed in as/i })).not.toBeInTheDocument();
+  });
+
   it("still opens the mobile navigation", async () => {
     const { onOpenNavigation } = renderHeader("manager@sentinel.com");
 
