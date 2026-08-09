@@ -26,22 +26,6 @@ moved. A version bump from secret propagation is not a deploy.
 
 ## Known gaps, accepted
 
-**The pipeline does not poll; the upload panel does.** `useUploadStatus` polls with backoff,
-`useAgentRuns` reads once on mount. Right after an import the upload panel updates live while
-the pipeline appears only on navigation or reload. Noticed once per import, and the e2e test
-works around it by waiting on the API before navigating. Worth fixing when someone touches
-that page next.
-
-**Agent runs are not backfilled.** Run rows only exist from this migration forward, so the 23
-uploads parsed before it show no pipeline at all and their case summaries still read "Analysis
-not started" despite holding findings. A backfill would have to invent `started_at`,
-`completed_at`, and an `input_count` nobody recorded. Fabricating those to make old cases look
-tidy is exactly the kind of thing the last several slices existed to remove.
-
-**One upload has a one-stage pipeline.** `a8070faa` was used to verify `analyze-upload`
-against the live database before any fresh import existed, so it has a `fraud-pattern` run and
-no `deterministic` one. Truthful, and it will look odd to anyone who opens it.
-
 **A stage's `total` counts uploads, not rows.** Deliberate — a run either finishes or it does
 not, so per-run progress would have to be invented. It does mean the percentage moves in
 coarse steps on an investigation with few uploads.
@@ -96,6 +80,28 @@ observation.
 **`count()` does not auto-wait in Playwright.** Polling the DOM with `reload()` inside
 `expect.poll` spins forever: each iteration re-navigates before React has rendered the
 previous one. Wait on the API, then navigate once and assert with an auto-waiting matcher.
+
+## Closed before the merge
+
+Three items were written up as accepted gaps and then fixed, because together they meant the
+feature was unreachable on every piece of existing data:
+
+- **The pipeline now polls.** `useAgentRuns` reads on the same cadence `useUploadStatus`
+  already used, while a run is `running` or while a case has no runs yet. `waiting` is
+  excluded deliberately — the AI agent rests there until asked, so polling on it would never
+  stop — as is an empty workspace view, where no runs means nothing has been imported.
+- **Agent runs are backfilled.** The concern was having to invent `started_at`,
+  `completed_at`, and counts nobody recorded. It turned out nothing had to be invented: an
+  `analysis-completed` event exists for exactly the uploads whose deterministic pass ran, and
+  it carries the timestamp. So 4 uploads were seeded `complete` from their own audit trail,
+  19 were seeded `waiting` because analysis genuinely never ran for them, `started_at` stays
+  null everywhere, and zero uploads had findings we could not account for.
+- **The one-stage pipeline on `a8070faa` is gone**, as a consequence of the same backfill.
+
+The contradiction that prompted it is worth remembering: three cases said "Analysis not
+started" on the summary while listing three findings one step away. A case is not allowed to
+disagree with itself, and "old data looks empty" turned out to be that bug wearing a
+different hat.
 
 ## Closed since the last note
 
