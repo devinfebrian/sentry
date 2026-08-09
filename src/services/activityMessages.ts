@@ -36,9 +36,11 @@ export function describeActivity(entry: ActivityEntry, names?: MemberNames): str
 
   switch (entry.type) {
     case "investigation-created": {
-      const reference = text(metadata, "reference");
+      // The reference is deliberately left out when the entity is known: the feed already
+      // renders it as the link beside this sentence, and printing both reads as a stutter.
       const entity = text(metadata, "entity");
-      if (reference && entity) return `opened ${reference} for ${entity}`;
+      if (entity) return `opened a case for ${entity}`;
+      const reference = text(metadata, "reference");
       return reference ? `opened ${reference}` : "opened an investigation";
     }
     case "upload-created": {

@@ -19,9 +19,15 @@ function entry(type: ActivityEventType | string, metadata: Record<string, unknow
 }
 
 describe("describeActivity", () => {
-  it("describes an opened investigation with its reference and entity", () => {
+  it("names the entity and leaves the reference to the link beside it", () => {
+    // Printing both stutters: "opened INV-ABC123 for Northwind Traders INV-ABC123".
     expect(describeActivity(entry("investigation-created", { reference: "INV-ABC123", entity: "Northwind Traders" })))
-      .toBe("opened INV-ABC123 for Northwind Traders");
+      .toBe("opened a case for Northwind Traders");
+  });
+
+  it("falls back to the reference when the entity is missing", () => {
+    expect(describeActivity(entry("investigation-created", { reference: "INV-ABC123" })))
+      .toBe("opened INV-ABC123");
   });
 
   it("describes an upload by filename", () => {
