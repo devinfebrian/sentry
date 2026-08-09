@@ -71,6 +71,12 @@ const responseSchema = {
             type: "NUMBER",
             description: "Between 0 and 1. How sure you are the pattern is really present in these rows.",
           },
+          severity: {
+            type: "STRING",
+            enum: ["low", "medium", "high"],
+            description:
+              "How much this matters if the pattern is real. Independent of confidence — a certain pattern can be minor.",
+          },
           evidence: {
             type: "ARRAY",
             description: "The rows that support the finding. Every finding needs at least one.",
@@ -92,8 +98,8 @@ const responseSchema = {
             },
           },
         },
-        required: ["rule", "summary", "confidence", "evidence"],
-        propertyOrdering: ["rule", "summary", "confidence", "evidence"],
+        required: ["rule", "summary", "confidence", "severity", "evidence"],
+        propertyOrdering: ["rule", "summary", "confidence", "severity", "evidence"],
       },
     },
   },
