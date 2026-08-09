@@ -124,6 +124,22 @@ syncs role once per session key. Self-corrects on token refresh, and the new
   manager row implies a second manager; the self-demotion guard closed the remaining path.
   The server guard stays load-bearing, but the copy is effectively dead.
 
+## From the activity log slice
+
+- **Bounded at 50 events with no pagination.** `DEFAULT_ACTIVITY_LIMIT` caps the feed, and
+  the workspace already renders a full page of them. There is no way to reach older
+  activity, which an audit trail will eventually need.
+- **No filtering by type or actor.** Deliberate for now — the feed is short enough to scan.
+  It stops being scannable somewhere in the low hundreds.
+- **Deleted members render as `Member 14310c77`.** A rejected invitation removes the
+  `sentinel_members` row, so the roster can no longer name them, but their events remain.
+  The fallback is correct; an audit trail that forgets who it is about is not ideal.
+- **`rationale` is still never written.** The column exists on `sentinel_activity_events`
+  and every line is synthesised instead. Worth either populating or dropping.
+- **The feed re-reads the roster per mount.** The lookup is cached per service instance, so
+  it is one query per page rather than per read — but nothing invalidates it after a rename
+  except a full remount. `MemberNameLookup.invalidate()` exists and has no caller.
+
 ## Closed since triage
 
 Recorded so nobody re-opens them: the migration-history desync, the self-demotion empty
