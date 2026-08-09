@@ -11,7 +11,16 @@ export type CaseAnalysisState =
  * ready state rather than an error — the caller keeps showing "Analysis not started",
  * which stays true until a rule has something to say.
  */
-export function useCaseAnalysis(investigationId: string | undefined, analysis?: SentinelAnalysisService | null) {
+export function useCaseAnalysis(
+  investigationId: string | undefined,
+  analysis?: SentinelAnalysisService | null,
+  /**
+   * Bump to re-read after something has written findings — running an agent, for instance.
+   * Neither the id nor the service changes in that case, so without this the hook would
+   * keep showing the analysis as it stood before the run.
+   */
+  reloadToken = 0,
+) {
   const [state, setState] = useState<CaseAnalysisState>({ status: "loading" });
   const requestIdRef = useRef(0);
 
@@ -40,7 +49,7 @@ export function useCaseAnalysis(investigationId: string | undefined, analysis?: 
     return () => {
       active = false;
     };
-  }, [investigationId, analysis]);
+  }, [investigationId, analysis, reloadToken]);
 
   return state;
 }

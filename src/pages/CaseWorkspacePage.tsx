@@ -14,8 +14,10 @@ import { DecisionRecord as DecisionRecordComponent } from "../components/decisio
 import { UploadStatusPanel } from "../components/cases/UploadStatusPanel";
 import { CaseActivityPanel } from "../components/cases/CaseActivityPanel";
 import type { MemberNameLookup } from "../services/memberNames";
+import { runAgentAcrossUploads, toPipelineStages } from "../services/sentinelAgentRuns";
 import { useCaseAnalysis } from "./useCaseAnalysis";
-import type { AgentStage, CaseSummary, DecisionRecord as DecisionRecordData, EvidenceRecord, Finding, SentinelActivityService, SentinelAnalysisService, SentinelInvestigationService, SentinelUploadService } from "../domain/types";
+import { useAgentRuns } from "./useAgentRuns";
+import type { AgentStage, CaseSummary, DecisionRecord as DecisionRecordData, EvidenceRecord, Finding, SentinelActivityService, SentinelAgentRunService, SentinelAnalysisService, SentinelInvestigationService, SentinelUploadService } from "../domain/types";
 
 const stepCopy: Record<string, { eyebrow: string; title: string; description: string }> = {
   summary: { eyebrow: "Case workspace / summary", title: "Investigation summary", description: "Review current agent progress, risk signals, and the next accountable action." },
@@ -38,6 +40,7 @@ export interface CaseWorkspacePageProps {
   uploadService?: Pick<SentinelUploadService, "getLatestForInvestigation" | "getStatus" | "listRows" | "retryParsing"> | null;
   activityService?: SentinelActivityService | null;
   analysisService?: SentinelAnalysisService | null;
+  agentRunService?: SentinelAgentRunService | null;
   memberNames?: MemberNameLookup | null;
   demoData?: CaseWorkspaceDemoData;
 }
@@ -51,9 +54,10 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Try again to reload this persisted investigation.";
 }
 
-export function CaseWorkspacePage({ investigationService, uploadService, activityService, analysisService, memberNames, demoData }: CaseWorkspacePageProps) {
+export function CaseWorkspacePage({ investigationService, uploadService, activityService, analysisService, agentRunService, memberNames, demoData }: CaseWorkspacePageProps) {
   const { caseId = "", step = "summary" } = useParams();
   const [retryKey, setRetryKey] = useState(0);
+  const [agentError, setAgentError] = useState<string | null>(null);
   const [state, setState] = useState<LoadState>(() => demoData
     ? { status: "ready", caseItem: demoData.cases.find((item) => item.id === caseId) ?? null }
     : { status: "loading" });
@@ -94,7 +98,25 @@ export function CaseWorkspacePage({ investigationService, uploadService, activit
   }, [caseId, demoData, investigationService, retryKey]);
 
   const retry = () => setRetryKey((current) => current + 1);
-  const analysis = useCaseAnalysis(demoData ? undefined : state.status === "ready" ? state.caseItem?.databaseId : undefined, analysisService);
+  const investigationDatabaseId = demoData ? undefined : state.status === "ready" ? state.caseItem?.databaseId : undefined;
+  const analysis = useCaseAnalysis(investigationDatabaseId, analysisService, retryKey);
+  const agentRuns = useAgentRuns(investigationDatabaseId, demoData ? null : agentRunService);
+
+  const handleAgentAction = async (agentKey: string) => {
+    if (agentRuns.state.status !== "ready" || !agentRunService) return;
+    setAgentError(null);
+    try {
+      await runAgentAcrossUploads(agentRunService, agentRuns.state.runs, agentKey);
+    } catch (error) {
+      setAgentError(error instanceof Error ? error.message : "This agent could not be run.");
+    } finally {
+      // Re-read either way: a partial run still moved some uploads, and the pipeline should
+      // show what actually happened rather than what was hoped for.
+      agentRuns.refresh();
+      // Findings may exist now that did not a moment ago.
+      setRetryKey((current) => current + 1);
+    }
+  };
 
   if (state.status === "loading") return <LoadingState label="Loading case" />;
 
@@ -116,6 +138,17 @@ export function CaseWorkspacePage({ investigationService, uploadService, activit
   // A failed read is not an absence of findings. Only the findings and evidence steps
   // read analysis at all, so only they can report its failure.
   const analysisFailed = analysis.status === "error" && (step === "findings" || step === "evidence");
+  const hasRuns = agentRuns.state.status === "ready" && agentRuns.state.runs.length > 0;
+
+  /**
+   * "Analysis not started" has to stop being true the moment it stops being true.
+   *
+   * On findings and evidence that means findings exist. On summary it means an agent run
+   * exists — including one that is waiting or failed, because a pipeline showing a failed
+   * stage next to the words "Analysis not started" tells the reader two different things.
+   */
+  const analysisHasBegun = (hasFindings && (step === "findings" || step === "evidence"))
+    || (step === "summary" && (hasRuns || agentRuns.state.status === "error"));
 
   const findings = demoData?.findings.filter((finding) => finding.caseId === caseItem.id) ?? [];
   return (
@@ -133,9 +166,23 @@ export function CaseWorkspacePage({ investigationService, uploadService, activit
           </>
         ) : (
           <>
-            {/* Source data is real once parsed; the rest of the pipeline still is not.
-                Each part reports itself, rather than letting one imply the others. */}
+            {/* Source data is real once parsed, and so is the pipeline over it. The later
+                steps still are not. Each part reports itself, rather than letting one imply
+                the others. */}
             {step === "summary" && <UploadStatusPanel investigationId={caseItem.databaseId} uploadService={uploadService} />}
+
+            {step === "summary" && agentError && (
+              <div role="alert" className="agent-pipeline-action-error">{agentError}</div>
+            )}
+            {step === "summary" && agentRuns.state.status === "error" && (
+              <AnalysisUnavailableState />
+            )}
+            {step === "summary" && hasRuns && (
+              <AgentPipeline
+                stages={toPipelineStages(agentRuns.state.status === "ready" ? agentRuns.state.runs : [])}
+                onRetry={handleAgentAction}
+              />
+            )}
 
             {step === "findings" && hasFindings && (
               <section className="finding-list">
@@ -154,7 +201,7 @@ export function CaseWorkspacePage({ investigationService, uploadService, activit
 
             {/* Still true wherever analysis produced nothing — a clean import genuinely
                 has no findings, and the other steps have no implementation at all. */}
-            {!analysisFailed && !(hasFindings && (step === "findings" || step === "evidence")) && (
+            {!analysisFailed && !analysisHasBegun && (
               <AnalysisNotStartedState step={step} />
             )}
             {step === "summary" && (

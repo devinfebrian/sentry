@@ -25,10 +25,31 @@ function getTone(status: AgentStageData["status"]) {
   return "neutral" as const;
 }
 
+interface StageAction {
+  label: string;
+  busyLabel: string;
+  ariaLabel: string;
+}
+
+/** What a click means for a stage in this state, or nothing when there is no work to start. */
+function getAction(stage: AgentStageData): StageAction | null {
+  switch (stage.status) {
+    case "failed":
+      return { label: "Retry stage", busyLabel: "Retrying", ariaLabel: `Retry ${stage.name}` };
+    case "waiting":
+      return { label: "Run agent", busyLabel: "Running", ariaLabel: `Run ${stage.name}` };
+    case "complete":
+      return { label: "Run again", busyLabel: "Running", ariaLabel: `Run ${stage.name} again` };
+    default:
+      return null;
+  }
+}
+
 export function AgentStage({ stage, onRetry, compact = false }: AgentStageProps) {
   const [retrying, setRetrying] = useState(false);
   const percentage = stage.total > 0 ? Math.round((stage.completed / stage.total) * 100) : 0;
   const statusLabel = statusLabels[stage.status];
+  const action = getAction(stage);
 
   const handleRetry = async () => {
     if (!onRetry) return;
@@ -66,9 +87,22 @@ export function AgentStage({ stage, onRetry, compact = false }: AgentStageProps)
       {stage.failureReason && (
         <p className="agent-stage-failure">{stage.failureReason}</p>
       )}
-      {stage.status === "failed" && onRetry && (
-        <Button variant="secondary" onClick={handleRetry} disabled={retrying} aria-label={`Retry ${stage.name}`}>
-          {retrying ? "Retrying" : "Retry stage"}
+      {/* One action against the same run row, labelled for what the click actually does.
+          A waiting agent has been scheduled but nothing has asked it to run; a complete one
+          can be run again, which is the whole point of scoping findings by producer — a
+          re-run replaces this agent's findings and leaves every other agent's alone. Only
+          `running` offers nothing, because the work is already in flight.
+
+          "Retry" on a stage that has never run, or one that succeeded, would misdescribe
+          it — hence three labels rather than one. */}
+      {action && onRetry && (
+        <Button
+          variant="secondary"
+          onClick={handleRetry}
+          disabled={retrying}
+          aria-label={action.ariaLabel}
+        >
+          {retrying ? action.busyLabel : action.label}
         </Button>
       )}
     </li>

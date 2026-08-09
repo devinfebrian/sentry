@@ -23,6 +23,9 @@ import type { SentinelMemberClient } from "../services/sentinelMembers";
 import { createSentinelActivityService } from "../services/sentinelActivity";
 import { createSentinelAnalysisService } from "../services/sentinelAnalysis";
 import type { SentinelAnalysisClient } from "../services/sentinelAnalysis";
+import { createSentinelAgentRunService } from "../services/sentinelAgentRuns";
+import type { SentinelAgentRunClient } from "../services/sentinelAgentRuns";
+import { OperationsPage } from "../pages/OperationsPage";
 import type { SentinelActivityClient } from "../services/sentinelActivity";
 import { createMemberNameLookup } from "../services/memberNames";
 import { ActivityPage } from "../pages/ActivityPage";
@@ -50,6 +53,7 @@ function WorkspaceLayout() {
   const memberClient = supabase ? supabase as unknown as SentinelMemberClient : null;
   const activityClient = supabase ? supabase as unknown as SentinelActivityClient : null;
   const analysisClient = supabase ? supabase as unknown as SentinelAnalysisClient : null;
+  const agentRunClient = supabase ? supabase as unknown as SentinelAgentRunClient : null;
   const uploadService = useMemo(() => uploadClient && serviceContext
     ? createSentinelUploadService(uploadClient, serviceContext)
     : null, [uploadClient, user?.id, workspaceId]);
@@ -76,6 +80,9 @@ function WorkspaceLayout() {
   const analysisService = useMemo(() => analysisClient && serviceContext
     ? createSentinelAnalysisService(analysisClient, serviceContext)
     : null, [analysisClient, workspaceId]);
+  const agentRunService = useMemo(() => agentRunClient && serviceContext
+    ? createSentinelAgentRunService(agentRunClient, serviceContext)
+    : null, [agentRunClient, workspaceId]);
 
   const importWorkflow = useMemo(() => investigationService && uploadService && user?.id
     ? createImportWorkflow({ investigations: investigationService, uploads: uploadService, ownerId: user.id })
@@ -107,10 +114,10 @@ function WorkspaceLayout() {
       <Routes>
         <Route path="/" element={<OverviewPage investigationService={investigationService} importButtonRef={overviewImportButtonRef} onImportData={() => setImportOpen(true)} />} />
         <Route path="/cases" element={<CasesPage investigationService={investigationService} importButtonRef={casesImportButtonRef} onImportData={() => setImportOpen(true)} />} />
-        <Route path="/cases/:caseId/:step" element={<CaseWorkspacePage investigationService={investigationService} uploadService={uploadService} activityService={activityService} analysisService={analysisService} memberNames={memberNames} />} />
+        <Route path="/cases/:caseId/:step" element={<CaseWorkspacePage investigationService={investigationService} uploadService={uploadService} activityService={activityService} analysisService={analysisService} agentRunService={agentRunService} memberNames={memberNames} />} />
         <Route path="/evidence" element={<AnalysisNotStartedPage module="Evidence" step="evidence" />} />
         <Route path="/reports" element={<AnalysisNotStartedPage module="Reports" step="report" />} />
-        <Route path="/operations" element={<AnalysisNotStartedPage module="Agent pipeline" step="summary" />} />
+        <Route path="/operations" element={<OperationsPage agentRunService={agentRunService} />} />
         <Route path="/activity" element={<ActivityPage activityService={activityService} investigationService={investigationService} memberNames={memberNames} />} />
         {DemoRoutePage && <Route path="/demo/*" element={<Suspense fallback={<div role="status">Loading demo</div>}><DemoRoutePage /></Suspense>} />}
         <Route path="/workspace" element={<WorkspacePage memberService={memberService} role={role} />} />

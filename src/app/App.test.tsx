@@ -193,7 +193,7 @@ describe("App", () => {
     await waitFor(() => expect(screen.getByRole("main")).toHaveFocus());
   });
 
-  it.each(["/evidence", "/reports", "/operations"])("does not expose fixture module at %s in production routes", async (path) => {
+  it.each(["/evidence", "/reports"])("does not expose fixture module at %s in production routes", async (path) => {
     window.history.pushState({}, "", path);
 
     renderAuthenticatedApp();
@@ -201,6 +201,19 @@ describe("App", () => {
     expect(await screen.findByRole("heading", { name: /analysis not started/i })).toBeInTheDocument();
     expect(screen.queryByText("Beneficiary mismatch warrants enhanced review before payment release.")).not.toBeInTheDocument();
     expect(screen.queryByText("Northstar Ltd requires enhanced review before payment release.")).not.toBeInTheDocument();
+  });
+
+  it("serves the real agent pipeline at /operations without fixture data", async () => {
+    // /operations stopped being "Analysis not started" when agent runs became real. The
+    // half of this that still matters is unchanged: no fixture case may appear here.
+    window.history.pushState({}, "", "/operations");
+
+    renderAuthenticatedApp();
+
+    expect(await screen.findByRole("heading", { name: /agent pipeline/i })).toBeInTheDocument();
+    expect(screen.queryByText("Beneficiary mismatch warrants enhanced review before payment release.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Northstar Ltd requires enhanced review before payment release.")).not.toBeInTheDocument();
+    expect(screen.queryByText(/24 active cases/)).not.toBeInTheDocument();
   });
 
   it("exposes fixture pages only under the explicit demo route in DEV", async () => {
