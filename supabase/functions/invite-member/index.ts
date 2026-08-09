@@ -24,6 +24,11 @@ type ReservationClaim = {
   reservation: InvitationReservation;
 };
 
+/** Matches the backfill in 20260809000000_sentinel_identity_and_activity.sql. */
+function displayNameFor(email: string) {
+  return email.split("@")[0] || email;
+}
+
 function responseForError(error: unknown, request: Request) {
   if (error instanceof HttpError || error instanceof PolicyError) {
     return errorResponse(error.message, error.status, request, allowedOrigins);
@@ -335,6 +340,9 @@ export async function handleRequest(request: Request) {
       role: "analyst",
       status: "pending",
       invited_email: reservation.email,
+      // Seeded so colleagues have something to call them before they rename themselves.
+      // The address itself stays manager-only; only this derived name is widely readable.
+      display_name: displayNameFor(reservation.email),
     });
     if (memberError) {
       if (memberError.code === "23505") {

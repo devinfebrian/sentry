@@ -53,7 +53,10 @@ export type SentinelMemberStatus = "active" | "pending";
 
 export interface SentinelMember {
   userId: string;
+  /** Manager-only: analysts have no column grant on invited_email. */
   email: string | null;
+  /** Readable by every active member, which is what makes owner names possible. */
+  displayName: string | null;
   role: SentinelMemberRole;
   status: SentinelMemberStatus;
   joinedAt: string;
@@ -66,6 +69,8 @@ export interface SentinelMemberService {
   activate(userId: string): Promise<void>;
   setRole(userId: string, role: SentinelMemberRole): Promise<void>;
   rejectInvitation(userId: string): Promise<void>;
+  /** Renames the caller only; the RPC ignores any other member. */
+  setDisplayName(displayName: string): Promise<void>;
 }
 
 export interface EvidenceRecord {
@@ -90,6 +95,37 @@ export interface Finding {
   contradictoryEvidenceIds: string[];
 }
 
+/** The nine values permitted by the sentinel_activity_events event_type CHECK. */
+export type ActivityEventType =
+  | "investigation-created"
+  | "upload-created"
+  | "parse-started"
+  | "parse-completed"
+  | "parse-failed"
+  | "member-invited"
+  | "member-activated"
+  | "member-role-changed"
+  | "member-invite-rejected";
+
+/**
+ * A recorded workspace event. Deliberately distinct from `ActivityEvent` below, which is a
+ * fixture-backed decision history for the Decision step and shares none of these types.
+ */
+export interface ActivityEntry {
+  id: string;
+  investigationId: string | null;
+  actorId: string | null;
+  type: ActivityEventType;
+  /** jsonb, so the shape varies per event type — read it through safe accessors. */
+  metadata: Record<string, unknown>;
+  occurredAt: string;
+}
+
+export interface SentinelActivityService {
+  list(options?: { investigationId?: string; limit?: number }): Promise<ActivityEntry[]>;
+}
+
+/** Fixture-only: the decision history rendered on a case, not the workspace activity feed. */
 export interface ActivityEvent {
   id: string;
   caseId: string;

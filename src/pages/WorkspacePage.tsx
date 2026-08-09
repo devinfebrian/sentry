@@ -4,12 +4,13 @@ import { EmptyState } from "../components/ui/EmptyState";
 import { ErrorState } from "../components/ui/ErrorState";
 import { LoadingState } from "../components/ui/LoadingState";
 import { StatusBadge } from "../components/ui/StatusBadge";
+import { formatDate } from "../lib/datetime";
 import { INVALID_EMAIL_ERROR, normalizeMemberEmail } from "../services/sentinelMembers";
 import type { SentinelMember, SentinelMemberRole, SentinelMemberService } from "../domain/types";
 import { useWorkspaceMembers } from "./useWorkspaceMembers";
 
 interface WorkspacePageProps {
-  memberService?: Pick<SentinelMemberService, "list" | "invite" | "activate" | "setRole" | "rejectInvitation"> | null;
+  memberService?: Pick<SentinelMemberService, "list" | "invite" | "activate" | "setRole" | "rejectInvitation" | "setDisplayName"> | null;
   role?: SentinelMemberRole | null;
 }
 
@@ -20,13 +21,10 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Try again to reload workspace members.";
 }
 
-function joinedLabel(joinedAt: string) {
-  const parsed = Date.parse(joinedAt);
-  return Number.isFinite(parsed) ? new Date(parsed).toISOString().slice(0, 10) : "Unknown";
-}
-
 export function WorkspacePage({ memberService, role }: WorkspacePageProps) {
   const [email, setEmail] = useState("");
+  const [displayName, setDisplayNameInput] = useState("");
+  const [renaming, setRenaming] = useState(false);
   const [inviting, setInviting] = useState(false);
   const [inviteError, setInviteError] = useState("");
   const [inviteNotice, setInviteNotice] = useState("");
@@ -76,6 +74,32 @@ export function WorkspacePage({ memberService, role }: WorkspacePageProps) {
     setInviting(false);
   };
 
+  const handleRename = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!memberService || renaming || busyUserId) return;
+
+    setInviteError("");
+    setInviteNotice("");
+
+    const trimmed = displayName.trim();
+    if (!trimmed) {
+      setInviteError("Enter a display name.");
+      return;
+    }
+
+    setRenaming(true);
+    // The RPC resolves the caller itself, so this can only ever rename you.
+    const outcome = await mutate(
+      () => memberService.setDisplayName(trimmed),
+      `Your display name is now ${trimmed}.`,
+      { refreshOnFailure: true },
+    );
+    if (outcome.ok) setDisplayNameInput("");
+    if (outcome.ok) setInviteNotice(outcome.message);
+    else setInviteError(outcome.message);
+    setRenaming(false);
+  };
+
   return (
     <div className="workspace-settings-page">
       <header className="page-heading page-heading-simple">
@@ -109,11 +133,11 @@ export function WorkspacePage({ memberService, role }: WorkspacePageProps) {
           <div className="section-header-lined">
             <div>
               <span className="section-kicker">Access / membership</span>
-              <h2 id="workspace-members-title">{isManager ? "Workspace members" : "Your workspace membership"}</h2>
+              <h2 id="workspace-members-title">{"Workspace members"}</h2>
             </div>
           </div>
           <div className="table-scroll">
-            <table className="data-table" aria-label={isManager ? "Workspace members" : "Your workspace membership"}>
+            <table className="data-table" aria-label={"Workspace members"}>
               <thead>
                 <tr>
                   <th scope="col">Member</th>
@@ -127,8 +151,13 @@ export function WorkspacePage({ memberService, role }: WorkspacePageProps) {
                 {members.map((member) => (
                   <tr key={member.userId}>
                     <td>
-                      <span className="member-identity">{member.email ?? member.userId}</span>
+                      {/* Display name is readable by every member; the address is not, so
+                          it only ever appears as a manager-only second line. */}
+                      <span className="member-identity">{member.displayName ?? member.email ?? member.userId}</span>
                       {member.isSelf && <span className="member-self"> (you)</span>}
+                      {member.email && member.displayName && (
+                        <span className="member-email">{member.email}</span>
+                      )}
                     </td>
                     <td>{roleLabels[member.role]}</td>
                     <td>
@@ -138,7 +167,7 @@ export function WorkspacePage({ memberService, role }: WorkspacePageProps) {
                         tone={member.status === "active" ? "confirm" : "warning"}
                       />
                     </td>
-                    <td className="numeric">{joinedLabel(member.joinedAt)}</td>
+                    <td className="numeric">{formatDate(member.joinedAt)}</td>
                     {actions && (
                       <td className="member-actions">
                         {member.status === "pending" ? (
@@ -235,6 +264,34 @@ export function WorkspacePage({ memberService, role }: WorkspacePageProps) {
 
       {/* Hold the invite controls back until the directory settles, and drop them entirely
           when there is no service to call, so the form is never a dead control. */}
+      {/* Everyone can rename themselves; the seeded name is an email fragment, which is
+          identifying but rarely what someone would choose to be called. */}
+      {state.status === "ready" && memberService && (
+        <section className="workspace-invite" aria-labelledby="workspace-display-name-title">
+          <div className="section-header-lined">
+            <div>
+              <span className="section-kicker">Access / your profile</span>
+              <h2 id="workspace-display-name-title">Your display name</h2>
+            </div>
+          </div>
+          <p>This is how colleagues see you on cases you own. It never reveals your email address.</p>
+          <form className="workspace-invite-form" noValidate onSubmit={(event) => void handleRename(event)}>
+            <label htmlFor="member-display-name">Display name</label>
+            <input
+              id="member-display-name"
+              name="displayName"
+              type="text"
+              maxLength={80}
+              autoComplete="nickname"
+              value={displayName}
+              disabled={renaming}
+              onChange={(event) => setDisplayNameInput(event.target.value)}
+            />
+            <Button variant="secondary" type="submit" disabled={renaming || busyUserId !== null}>Save name</Button>
+          </form>
+        </section>
+      )}
+
       {state.status !== "loading" && isManager && memberService && (
         <section className="workspace-invite" aria-labelledby="workspace-invite-title">
           <div className="section-header-lined">
@@ -259,10 +316,14 @@ export function WorkspacePage({ memberService, role }: WorkspacePageProps) {
             />
             <Button variant="primary" type="submit" disabled={inviting || busyUserId !== null}>Send invitation</Button>
           </form>
-          {inviteError && <div className="import-error" role="alert">{inviteError}</div>}
-          {inviteNotice && <div className="workspace-invite-notice" role="status" aria-live="polite">{inviteNotice}</div>}
         </section>
       )}
+
+      {/* One place for every outcome on this page. These used to sit inside the
+          manager-only invite section, which left an analyst renaming themselves with no
+          feedback at all, and competing live regions are worse than one predictable one. */}
+      {inviteError && <div className="import-error" role="alert">{inviteError}</div>}
+      {inviteNotice && <div className="workspace-invite-notice" role="status" aria-live="polite">{inviteNotice}</div>}
 
       {state.status !== "loading" && !isManager && (
         <p className="workspace-invite-restricted">

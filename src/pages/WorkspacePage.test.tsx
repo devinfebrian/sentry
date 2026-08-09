@@ -8,6 +8,7 @@ import { WorkspacePage } from "./WorkspacePage";
 const manager: SentinelMember = {
   userId: "22222222-2222-4222-8222-222222222222",
   email: "manager@example.com",
+  displayName: "manager",
   role: "manager",
   status: "active",
   joinedAt: "2026-08-01T09:00:00.000Z",
@@ -17,6 +18,7 @@ const manager: SentinelMember = {
 const analyst: SentinelMember = {
   userId: "33333333-3333-4333-8333-333333333333",
   email: "analyst@example.com",
+  displayName: "analyst",
   role: "analyst",
   status: "pending",
   joinedAt: "2026-08-04T09:00:00.000Z",
@@ -30,6 +32,7 @@ function memberService(
     activate: (userId: string) => Promise<void>;
     setRole: (userId: string, role: "analyst" | "manager") => Promise<void>;
     rejectInvitation: (userId: string) => Promise<void>;
+    setDisplayName: (displayName: string) => Promise<void>;
   }> = {},
 ) {
   return {
@@ -38,6 +41,7 @@ function memberService(
     activate: vi.fn(overrides.activate ?? (async () => undefined)),
     setRole: vi.fn(overrides.setRole ?? (async () => undefined)),
     rejectInvitation: vi.fn(overrides.rejectInvitation ?? (async () => undefined)),
+    setDisplayName: vi.fn(overrides.setDisplayName ?? (async () => undefined)),
   };
 }
 
@@ -119,6 +123,7 @@ describe("WorkspacePage", () => {
       activate: vi.fn(async () => undefined),
       setRole: vi.fn(async () => undefined),
       rejectInvitation: vi.fn(async () => undefined),
+      setDisplayName: vi.fn(async () => undefined),
     };
     renderPage({ memberService: service, role: "manager" });
 
@@ -145,6 +150,7 @@ describe("WorkspacePage", () => {
       activate: vi.fn(async () => undefined),
       setRole: vi.fn(async () => undefined),
       rejectInvitation: vi.fn(async () => undefined),
+      setDisplayName: vi.fn(async () => undefined),
     };
     renderPage({ memberService: service, role: "manager" });
 
@@ -175,6 +181,7 @@ describe("WorkspacePage", () => {
       activate: vi.fn(async () => undefined),
       setRole: vi.fn(async () => undefined),
       rejectInvitation: vi.fn(async () => undefined),
+      setDisplayName: vi.fn(async () => undefined),
     };
     const currentService = memberService({ list: async () => [manager] });
     const { rerender } = render(<MemoryRouter><WorkspacePage memberService={staleService} role="manager" /></MemoryRouter>);
@@ -187,12 +194,60 @@ describe("WorkspacePage", () => {
     expect(screen.queryByText("stale@example.com")).not.toBeInTheDocument();
   });
 
-  it("falls back to the user id when a member has no invited email", async () => {
-    const seeded: SentinelMember = { ...manager, email: null };
+  it("identifies a member by display name ahead of their address", async () => {
+    const seeded: SentinelMember = { ...manager, displayName: "ada.lovelace", email: "ada@example.com" };
+    renderPage({ memberService: memberService({ list: async () => [seeded] }), role: "manager" });
+
+    const table = await screen.findByRole("table", { name: /workspace members/i });
+    expect(within(table).getByText("ada.lovelace")).toBeInTheDocument();
+    // A manager still sees the address, as a secondary line rather than the identity.
+    expect(within(table).getByText("ada@example.com")).toBeInTheDocument();
+  });
+
+  it("falls back to the user id when a member has neither name nor address", async () => {
+    const seeded: SentinelMember = { ...manager, displayName: null, email: null };
     renderPage({ memberService: memberService({ list: async () => [seeded] }), role: "manager" });
 
     const table = await screen.findByRole("table", { name: /workspace members/i });
     expect(within(table).getByText(seeded.userId)).toBeInTheDocument();
+  });
+
+  it("shows an analyst the roster by name without leaking any address", async () => {
+    // The widened SELECT policy is what makes owner names possible; the column grant is
+    // what keeps addresses out of it.
+    const colleague: SentinelMember = { ...analyst, email: null, displayName: "grace.hopper", isSelf: false };
+    const me: SentinelMember = { ...manager, role: "analyst", email: null, displayName: "ada.lovelace", isSelf: true };
+    renderPage({ memberService: memberService({ list: async () => [me, colleague] }), role: "analyst" });
+
+    const table = await screen.findByRole("table", { name: /workspace members/i });
+    expect(within(table).getByText("grace.hopper")).toBeInTheDocument();
+    expect(within(table).getByText("ada.lovelace")).toBeInTheDocument();
+    expect(within(table).queryByText(/@/)).not.toBeInTheDocument();
+  });
+
+  it("renames only the signed-in member", async () => {
+    const service = memberService();
+    renderPage({ memberService: service, role: "analyst" });
+
+    await screen.findByRole("table", { name: /workspace members/i });
+    await userEvent.type(screen.getByRole("textbox", { name: /display name/i }), "  ada.lovelace  ");
+    await userEvent.click(screen.getByRole("button", { name: /save name/i }));
+
+    // No user id argument exists to aim elsewhere: the RPC resolves the caller itself.
+    expect(service.setDisplayName).toHaveBeenCalledWith("ada.lovelace");
+    expect(await screen.findByRole("status")).toHaveTextContent(/your display name is now ada\.lovelace/i);
+  });
+
+  it("rejects an empty display name without calling the service", async () => {
+    const service = memberService();
+    renderPage({ memberService: service, role: "analyst" });
+
+    await screen.findByRole("table", { name: /workspace members/i });
+    await userEvent.type(screen.getByRole("textbox", { name: /display name/i }), "   ");
+    await userEvent.click(screen.getByRole("button", { name: /save name/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/enter a display name/i);
+    expect(service.setDisplayName).not.toHaveBeenCalled();
   });
 });
 
@@ -200,6 +255,7 @@ describe("member actions", () => {
   const secondManager: SentinelMember = {
     userId: "44444444-4444-4444-8444-444444444444",
     email: "second@example.com",
+    displayName: "second",
     role: "manager",
     status: "active",
     joinedAt: "2026-08-02T09:00:00.000Z",

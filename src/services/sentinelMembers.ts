@@ -5,7 +5,7 @@ import type { Database } from "../lib/database.types";
 type MemberRow = Pick<
   Database["public"]["Tables"]["sentinel_members"]["Row"],
   "user_id" | "role" | "status" | "created_at"
-> & { invited_email?: string | null };
+> & { invited_email?: string | null; display_name?: string | null };
 type MemberContext = { workspaceId: string; userId: string; role: SentinelMemberRole | null };
 
 export type MemberSource = "sentinel_members" | "sentinel_manager_roster";
@@ -17,8 +17,8 @@ export type MemberSource = "sentinel_members" | "sentinel_manager_roster";
  * public.sentinel_manager_roster instead: a security_invoker view over a security
  * definer function that returns rows only for workspaces where the caller is a manager.
  */
-export const MANAGER_ROSTER_COLUMNS = "user_id, role, status, invited_email, created_at";
-export const MEMBER_COLUMNS = "user_id, role, status, created_at";
+export const MANAGER_ROSTER_COLUMNS = "user_id, role, status, invited_email, display_name, created_at";
+export const MEMBER_COLUMNS = "user_id, role, status, display_name, created_at";
 
 type MemberReadQuery = {
   eq(column: "workspace_id", value: string): {
@@ -39,7 +39,7 @@ export type SentinelMemberClient = {
     ): Promise<{ data: unknown; error: unknown }>;
   };
   rpc(
-    name: "sentinel_activate_member" | "sentinel_set_member_role" | "sentinel_reject_invitation",
+    name: "sentinel_activate_member" | "sentinel_set_member_role" | "sentinel_reject_invitation" | "sentinel_set_display_name",
     args: Record<string, string>,
   ): Promise<{ data: unknown; error: RpcError | null }>;
 };
@@ -82,6 +82,7 @@ function mapRow(row: MemberRow, userId: string): SentinelMember {
   return {
     userId: row.user_id,
     email: row.invited_email ?? null,
+    displayName: row.display_name ?? null,
     role: row.role,
     status: row.status,
     joinedAt: row.created_at,
@@ -155,6 +156,16 @@ export function createSentinelMemberService(
       });
 
       if (error) throw mapRpcError("change member role", error);
+    },
+
+    async setDisplayName(displayName) {
+      // No user id argument: the RPC resolves the caller from auth.uid(), so a client
+      // cannot aim this at anyone else.
+      const { error } = await client.rpc("sentinel_set_display_name", {
+        p_display_name: displayName,
+      });
+
+      if (error) throw mapRpcError("update display name", error);
     },
 
     async rejectInvitation(userId) {

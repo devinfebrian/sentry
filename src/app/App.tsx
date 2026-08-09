@@ -20,6 +20,10 @@ import { createSentinelUploadService } from "../services/sentinelUploads";
 import type { SentinelUploadClient } from "../services/sentinelUploads";
 import { createSentinelMemberService } from "../services/sentinelMembers";
 import type { SentinelMemberClient } from "../services/sentinelMembers";
+import { createSentinelActivityService } from "../services/sentinelActivity";
+import type { SentinelActivityClient } from "../services/sentinelActivity";
+import { createMemberNameLookup } from "../services/memberNames";
+import { ActivityPage } from "../pages/ActivityPage";
 import { supabase } from "../lib/supabase";
 
 const DemoRoutePage = import.meta.env.DEV
@@ -42,9 +46,7 @@ function WorkspaceLayout() {
   const investigationClient = supabase ? supabase as unknown as SentinelInvestigationClient : null;
   const uploadClient = supabase ? supabase as unknown as SentinelUploadClient : null;
   const memberClient = supabase ? supabase as unknown as SentinelMemberClient : null;
-  const investigationService = useMemo(() => investigationClient && serviceContext
-    ? createSentinelInvestigationService(investigationClient, serviceContext)
-    : null, [investigationClient, user?.id, workspaceId]);
+  const activityClient = supabase ? supabase as unknown as SentinelActivityClient : null;
   const uploadService = useMemo(() => uploadClient && serviceContext
     ? createSentinelUploadService(uploadClient, serviceContext)
     : null, [uploadClient, user?.id, workspaceId]);
@@ -52,6 +54,22 @@ function WorkspaceLayout() {
   const memberService = useMemo(() => memberClient && serviceContext
     ? createSentinelMemberService(memberClient, { ...serviceContext, role })
     : null, [memberClient, user?.id, workspaceId, role]);
+  // One cached roster read shared by everything that turns a member id into a name —
+  // owner columns and the activity feed both need it, and the case workspace asks for
+  // both in a single render.
+  const memberNames = useMemo(() => memberService ? createMemberNameLookup(memberService) : null, [memberService]);
+  // Investigations render owner names but cannot join to membership — owner_id references
+  // auth.users, so there is no relationship for PostgREST to embed. The lookup is passed
+  // in instead, keeping the two services independent.
+  const investigationService = useMemo(() => investigationClient && serviceContext
+    ? createSentinelInvestigationService(investigationClient, {
+      ...serviceContext,
+      loadOwnerNames: memberNames ?? undefined,
+    })
+    : null, [investigationClient, user?.id, workspaceId, memberNames]);
+  const activityService = useMemo(() => activityClient && serviceContext
+    ? createSentinelActivityService(activityClient, serviceContext)
+    : null, [activityClient, workspaceId]);
 
   const importWorkflow = useMemo(() => investigationService && uploadService && user?.id
     ? createImportWorkflow({ investigations: investigationService, uploads: uploadService, ownerId: user.id })
@@ -83,10 +101,11 @@ function WorkspaceLayout() {
       <Routes>
         <Route path="/" element={<OverviewPage investigationService={investigationService} importButtonRef={overviewImportButtonRef} onImportData={() => setImportOpen(true)} />} />
         <Route path="/cases" element={<CasesPage investigationService={investigationService} importButtonRef={casesImportButtonRef} onImportData={() => setImportOpen(true)} />} />
-        <Route path="/cases/:caseId/:step" element={<CaseWorkspacePage investigationService={investigationService} uploadService={uploadService} />} />
+        <Route path="/cases/:caseId/:step" element={<CaseWorkspacePage investigationService={investigationService} uploadService={uploadService} activityService={activityService} memberNames={memberNames} />} />
         <Route path="/evidence" element={<AnalysisNotStartedPage module="Evidence" step="evidence" />} />
         <Route path="/reports" element={<AnalysisNotStartedPage module="Reports" step="report" />} />
         <Route path="/operations" element={<AnalysisNotStartedPage module="Agent pipeline" step="summary" />} />
+        <Route path="/activity" element={<ActivityPage activityService={activityService} investigationService={investigationService} memberNames={memberNames} />} />
         {DemoRoutePage && <Route path="/demo/*" element={<Suspense fallback={<div role="status">Loading demo</div>}><DemoRoutePage /></Suspense>} />}
         <Route path="/workspace" element={<WorkspacePage memberService={memberService} role={role} />} />
         <Route path="*" element={<NotFoundPage />} />

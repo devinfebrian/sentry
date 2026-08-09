@@ -7,6 +7,25 @@ Findings that were reviewed, triaged, and deliberately not fixed. Each was seen 
 one reviewer and consciously deferred; none is an unknown. Grouped by whether it is worth
 acting on.
 
+## Applying migrations — read this before using `apply_migration`
+
+`mcp__plugin_supabase_supabase__apply_migration` **ignores the filename and stamps its own
+timestamp** into `supabase_migrations.schema_migrations`. The repo file and the remote row
+will therefore never match on their own, and once the remote version sorts after the local
+one, `supabase db push` hard-fails on ordering with an error that makes force-applying look
+like the fix.
+
+Two rules, both learned the hard way — this has now happened twice:
+
+1. **Apply one logical migration in exactly one call.** Two calls produce two rows that can
+   never reconcile against a single file.
+2. **Reconcile immediately afterwards.** Delete the stamped row(s) and insert one whose
+   `version` equals the repo filename prefix, then confirm with `list_migrations`. Touch
+   only `schema_migrations` — never the schema itself, which is already correct.
+
+Repaired this way for `20260808000000` and again for `20260809000000`. Repo and ledger are
+currently 1:1 across all ten migrations; keep them that way.
+
 ## Should fix soon
 
 **Playwright cross-file isolation is incidental, not guaranteed.**
@@ -87,6 +106,39 @@ syncs role once per session key. Self-corrects on token refresh, and the new
 - **Non-`Error` invite rejections say "Unable to update member."** where they used to say
   "Unable to invite member." `invite()` only ever throws `Error`, so the path is
   unreachable.
+
+## From the identity and activity slice
+
+- **Owner names cost an extra round trip per page.** `loadOwnerNames` in `src/app/App.tsx`
+  calls `memberService.list()` on every `list()` and `getById()`, uncached, so opening a
+  case queries the roster again. The roster is a handful of rows, so this is cheap today
+  and would become worth memoising on a larger workspace.
+- **Seeded display names are email fragments.** A member invited as
+  `everydayplaylist25@gmail.com` shows up as `everydayplaylist25` until they rename
+  themselves. Identifying, but not what anyone would choose to be called.
+- **Unknown owners still render a UUID fragment.** `Member 5e2de68d` beats a full UUID and
+  loses to a name. It only appears when an owner is missing from the roster.
+- **`formatRelative` does not tick.** "12 min ago" is computed at render, so it goes stale
+  on a page left open until something else forces a re-render.
+- **The last-manager hint is now doubly unreachable.** Noted previously because a non-self
+  manager row implies a second manager; the self-demotion guard closed the remaining path.
+  The server guard stays load-bearing, but the copy is effectively dead.
+
+## From the activity log slice
+
+- **Bounded at 50 events with no pagination.** `DEFAULT_ACTIVITY_LIMIT` caps the feed, and
+  the workspace already renders a full page of them. There is no way to reach older
+  activity, which an audit trail will eventually need.
+- **No filtering by type or actor.** Deliberate for now — the feed is short enough to scan.
+  It stops being scannable somewhere in the low hundreds.
+- **Deleted members render as `Member 14310c77`.** A rejected invitation removes the
+  `sentinel_members` row, so the roster can no longer name them, but their events remain.
+  The fallback is correct; an audit trail that forgets who it is about is not ideal.
+- **`rationale` is still never written.** The column exists on `sentinel_activity_events`
+  and every line is synthesised instead. Worth either populating or dropping.
+- **The feed re-reads the roster per mount.** The lookup is cached per service instance, so
+  it is one query per page rather than per read — but nothing invalidates it after a rename
+  except a full remount. `MemberNameLookup.invalidate()` exists and has no caller.
 
 ## Closed since triage
 
