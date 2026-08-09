@@ -940,10 +940,14 @@ it("filters cases by stage", async () => {
   expect(screen.getAllByRole("row")).toHaveLength(expected + 1);
 });
 
-it("keeps the columns readable for every stage a case can reach", () => {
+it("labels every stage rather than leaking a raw slug", () => {
   render(<MemoryRouter><CaseQueue cases={fixtureCases} /></MemoryRouter>);
-  // A raw slug in a table cell means stageLabels has fallen behind CaseStage.
-  expect(screen.queryByText(/awaiting-|fraud-pattern|not-started/)).not.toBeInTheDocument();
+  // Positive assertion first: an absence check is satisfied instantly by a page that has
+  // not rendered, which is the trap recorded in the 2026-08-10 follow-ups.
+  expect(screen.getAllByRole("row")).toHaveLength(fixtureCases.length + 1);
+  expect(screen.getAllByText("Analysed").length).toBeGreaterThan(0);
+  // Only then is the absence meaningful: a raw slug means stageLabels fell behind CaseStage.
+  expect(screen.queryByText(/awaiting-|fraud-review|not-started/)).not.toBeInTheDocument();
 });
 ```
 
@@ -1018,20 +1022,28 @@ A case reading "High risk" with no way to see why puts the reader back where thi
 
 - [ ] **Step 1: Write the failing test**
 
-Add to `src/services/sentinelAnalysis.test.ts`, following the file's existing fake-client helpers:
+Add to `src/services/sentinelAnalysis.test.ts`, inside the existing `describe("createSentinelAnalysisService", …)` block. The file's helpers are `listResponse(data: FindingRow[])` at line 46 and `serviceFor(response)` at line 62 — use those, and add `severity` to the shared `findingRow` fixture so the pre-existing tests keep type-checking:
 
 ```ts
 it("carries each finding's severity, and null where no producer rated it", async () => {
-  const rows = [
-    { id: "f1", investigation_id: "inv-1", rule: "outlier-amount", agent: "Financial analysis", summary: "s", confidence: 1, severity: "high", created_at: "2026-08-10T00:00:00.000Z", sentinel_evidence: [] },
-    { id: "f2", investigation_id: "inv-1", rule: "round-number-clustering", agent: "Fraud pattern investigator", summary: "s", confidence: 0.9, severity: null, created_at: "2026-08-10T00:00:01.000Z", sentinel_evidence: [] },
-  ];
-  const { findings } = await serviceReading(rows).list("inv-1");
+  const rated: FindingRow = { ...findingRow, id: "f1", severity: "high" };
+  const unrated: FindingRow = {
+    ...findingRow,
+    id: "f2",
+    agent: "Fraud pattern investigator",
+    rule: "round-number-clustering",
+    confidence: 0.9,
+    severity: null,
+  };
+  const service = serviceFor(Promise.resolve(listResponse([rated, unrated])));
+  const { findings } = await service.list("investigation-1");
 
   expect(findings[0].severity).toBe("high");
   expect(findings[1].severity).toBeNull();
 });
 ```
+
+Use whatever investigation id the file's `findingRow` fixture already carries rather than inventing one.
 
 - [ ] **Step 2: Run the test to verify it fails**
 
