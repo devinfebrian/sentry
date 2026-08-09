@@ -31,8 +31,10 @@ A fixed rule-to-severity table has the same flattening problem: every case runni
 | Rule | Magnitude available | `high` | `medium` | `low` |
 | --- | --- | --- | --- | --- |
 | `duplicate-amount` | `group.length` | ≥ 3 rows | 2 rows | — |
-| `outlier-amount` | `entry.value / middle` | ≥ 10× median | ≥ 4× median | — |
+| `outlier-amount` | `Math.round(entry.value / middle)` | ≥ 10× median | ≥ 4× median | — |
 | `missing-amount` | `affected.length / rows.length` | — | ≥ 10% of import | < 10% |
+
+The outlier rule compares the **rounded** multiple — the same number its summary prints. Comparing the raw ratio would let a finding at 9.6× read "10x the median" while being rated `medium`, and would put the live rule out of step with the backfill below, which reads that printed number. One value, used for the words and the rating, so the two cannot disagree.
 
 The empty cells are structural rather than omissions. `outlierAmounts` returns early below `OUTLIER_MULTIPLE` (4) and `duplicateAmounts` filters to groups larger than one, so neither can reach `low`. `missing-amount` cannot reach `high` at any volume: an absent amount is a data-quality gap, not a fraud signal, and a rule that cannot distinguish a bad export from a concealed payment should not claim it can.
 
@@ -68,7 +70,7 @@ The same migration rates the findings that predate the column, scoped `where sev
 
 - **`duplicate-amount`** — the group size *is* the count of supporting evidence rows, since `duplicateAmounts` emits one evidence row per member of the group. Exact.
 - **`missing-amount`** — the affected count is likewise the evidence row count, and the denominator is `sentinel_uploads.row_count`. Exact.
-- **`outlier-amount`** — evidence is always two rows (the outlier and the median for contrast), so the multiple is not recoverable from the evidence. It survives only inside the summary the code wrote itself, in a format that code controls: `substring(summary from '([0-9]+)x the median')`. Exact where it matches; **where it does not match, severity stays `null`** rather than falling back to a guess.
+- **`outlier-amount`** — evidence is always two rows (the outlier and the median for contrast), so the multiple is not recoverable from the evidence. It survives only inside the summary the code wrote itself, in a format that code controls: `substring(summary from '([0-9]+)x the median')`. Exact because the live rule rates on that same rounded multiple; **where the pattern does not match, severity stays `null`** rather than falling back to a guess.
 
 The 2 fraud-pattern findings are left `null`. Nothing recorded their severity, nothing can reconstruct it, and inventing one to make the column look complete is the fabrication the last several slices existed to remove. They gain a real severity when that agent is next run.
 
