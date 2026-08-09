@@ -179,6 +179,8 @@ describe("severity", () => {
       row(2, "Acme", 100), row(3, "Acme", 100), row(4, "Beta", 5), row(5, "Gamma", ""),
     ]);
     expect(findings.length).toBeGreaterThan(0);
-    for (const finding of findings) expect(finding.severity).not.toBeNull();
+    for (const finding of findings) {
+      expect(["low", "medium", "high"]).toContain(finding.severity);
+    }
   });
 });
