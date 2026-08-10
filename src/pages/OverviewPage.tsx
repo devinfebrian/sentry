@@ -6,7 +6,8 @@ import { EmptyState } from "../components/ui/EmptyState";
 import { ErrorState } from "../components/ui/ErrorState";
 import { LoadingState } from "../components/ui/LoadingState";
 import { StatusBadge } from "../components/ui/StatusBadge";
-import type { AgentStage, CaseStage, CaseSummary, SentinelInvestigationService } from "../domain/types";
+import { CASE_STAGE_LABELS } from "../domain/caseStages";
+import type { AgentStage, CaseSummary, SentinelInvestigationService } from "../domain/types";
 import type { RefObject } from "react";
 
 export interface OverviewDemoData {
@@ -22,14 +23,6 @@ export interface OverviewPageProps {
 }
 
 const riskLabels = { low: "Low risk", medium: "Medium risk", high: "High risk", "not-assessed": "Not assessed" } as const;
-const stageLabels: Record<CaseStage, string> = {
-  "awaiting-import": "Analysis not started",
-  analysing: "Analysing",
-  "analysis-failed": "Analysis failed",
-  "awaiting-analysis": "Awaiting analysis",
-  "fraud-review": "Fraud review",
-  analysed: "Analysed",
-};
 
 type LoadState =
   | { status: "loading" }
@@ -129,7 +122,7 @@ export function OverviewPage({ onImportData, importButtonRef, investigationServi
               <Link className="case-list-row" to={`/cases/${item.id}/summary`} key={item.id}>
                 <span className="case-list-identity"><span className="numeric">{item.id}</span><strong>{item.entity}</strong></span>
                 <span>{item.owner}</span>
-                <span>{stageLabels[item.stageId] ?? item.stageId}</span>
+                <span>{CASE_STAGE_LABELS[item.stageId]}</span>
                 <StatusBadge status={item.risk} label={riskLabels[item.risk]} tone={item.risk === "high" ? "risk" : item.risk === "low" ? "confirm" : item.risk === "not-assessed" ? "neutral" : "warning"} />
                 <span className="case-list-arrow" aria-hidden="true">-&gt;</span>
               </Link>

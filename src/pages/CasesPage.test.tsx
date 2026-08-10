@@ -29,7 +29,7 @@ describe("CasesPage", () => {
 
     expect(await screen.findByRole("link", { name: /imported company/i })).toBeInTheDocument();
     expect(screen.getAllByText("Not assessed").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Analysis not started").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Awaiting import").length).toBeGreaterThan(0);
     expect(screen.queryByText("Northstar Ltd")).not.toBeInTheDocument();
   });
 

@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { formatRelative } from "../../lib/datetime";
+import { CASE_STAGE_LABELS } from "../../domain/caseStages";
 import type { CaseStage, CaseSummary, RiskLevel } from "../../domain/types";
 import { StatusBadge } from "../ui/StatusBadge";
 
@@ -12,14 +13,6 @@ type SortKey = "entity" | "owner" | "ageDays";
 type SortDirection = "asc" | "desc";
 
 const riskLabels: Record<RiskLevel, string> = { low: "Low risk", medium: "Medium risk", high: "High risk", "not-assessed": "Not assessed" };
-const stageLabels: Record<CaseStage, string> = {
-  "awaiting-import": "Analysis not started",
-  analysing: "Analysing",
-  "analysis-failed": "Analysis failed",
-  "awaiting-analysis": "Awaiting analysis",
-  "fraud-review": "Fraud review",
-  analysed: "Analysed",
-};
 
 function riskTone(risk: RiskLevel) {
   return risk === "high" ? "risk" as const : risk === "low" ? "confirm" as const : risk === "not-assessed" ? "neutral" as const : "warning" as const;
@@ -75,10 +68,8 @@ export function CaseQueue({ cases }: CaseQueueProps) {
           <input id="case-search" type="search" value={query} onChange={(event) => updateParam("query", event.target.value)} placeholder="Entity, case ID, or owner" />
         </div>
         <div className="queue-filters">
-          {/* Risk and Stage filters are withheld until analysis produces more than one
-              value. Every row is currently not-assessed / not-started, so both could only
-              ever return everything or nothing. The columns stay — "Not assessed" is true.
-              The URL params are still honoured, so a saved link keeps working. */}
+          <div className="filter-field"><label htmlFor="risk-filter">Risk</label><select id="risk-filter" value={risk} onChange={(event) => updateParam("risk", event.target.value)}><option value="all">All risk levels</option>{(Object.keys(riskLabels) as RiskLevel[]).map((level) => <option value={level} key={level}>{riskLabels[level]}</option>)}</select></div>
+          <div className="filter-field"><label htmlFor="stage-filter">Stage</label><select id="stage-filter" value={stage} onChange={(event) => updateParam("stage", event.target.value)}><option value="all">All stages</option>{(Object.keys(CASE_STAGE_LABELS) as CaseStage[]).map((value) => <option value={value} key={value}>{CASE_STAGE_LABELS[value]}</option>)}</select></div>
           <div className="filter-field"><label htmlFor="owner-filter">Owner</label><select id="owner-filter" value={owner} onChange={(event) => updateParam("owner", event.target.value)}><option value="all">All owners</option>{owners.map((item) => <option value={item} key={item}>{item}</option>)}</select></div>
         </div>
       </div>
@@ -99,7 +90,7 @@ export function CaseQueue({ cases }: CaseQueueProps) {
               <tr key={item.id}>
                 <th scope="row"><Link className="table-primary-link" to={`/cases/${item.id}/summary`}><span className="numeric table-case-id">{item.id}</span><strong>{item.entity}</strong></Link></th>
                 <td>{item.owner}</td>
-                <td>{stageLabels[item.stageId] ?? item.stageId}</td>
+                <td>{CASE_STAGE_LABELS[item.stageId]}</td>
                 <td><StatusBadge status={item.risk} label={riskLabels[item.risk]} tone={riskTone(item.risk)} /></td>
                 <td className="numeric">{item.ageDays}d</td>
                 <td>{formatRelative(item.lastActivity)}</td>
