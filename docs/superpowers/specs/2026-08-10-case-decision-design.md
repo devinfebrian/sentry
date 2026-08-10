@@ -32,27 +32,45 @@ the 2026-08-10 follow-up notes and are not this slice's job.
 
 ## The workflow the schema already encodes
 
-The foundation migration wrote two update policies on `sentinel_investigations` that nothing
-has ever exercised:
+The foundation migration wrote two update policies on `sentinel_investigations` on 2026-08-05:
+one unconditional for managers, one bounding an assigned analyst to
+`owner_id = auth.uid() and status in ('open', 'review')` on both sides of the check. Neither had
+been exercised by anything in the application. `20260806044722_sentinel_rls_performance_hardening.sql`
+then merged the two into the single policy below, a full migration before this slice was
+planned — the substance is unchanged, but citing the two original policies as the ones
+currently live would now be wrong, so this describes the merged policy as it actually reads:
 
 ```sql
-create policy "sentinel managers can update investigations"
-  ...
-  using (private.sentinel_is_manager(workspace_id))
-  with check (private.sentinel_is_manager(workspace_id));
-
-create policy "sentinel assigned analysts can update open or review investigations"
-  ...
-  using  (... and owner_id = auth.uid() and status in ('open', 'review'))
-  with check (... and owner_id = auth.uid() and status in ('open', 'review'));
+create policy "sentinel investigations can update"
+  on public.sentinel_investigations
+  for update
+  to authenticated
+  using (
+    private.sentinel_is_manager(workspace_id)
+    or (
+      private.sentinel_is_active_member(workspace_id)
+      and owner_id = (select auth.uid())
+      and status in ('open', 'review')
+    )
+  )
+  with check ( -- same condition, repeated
+    private.sentinel_is_manager(workspace_id)
+    or (
+      private.sentinel_is_active_member(workspace_id)
+      and owner_id = (select auth.uid())
+      and status in ('open', 'review')
+    )
+  );
 ```
 
-The analyst policy bounds the status on **both** sides. An assigned analyst can move a case
+The analyst branch bounds the status on **both** sides. An assigned analyst can move a case
 between `open` and `review` and can do nothing else with it — writing `approved` or `closed`
-fails the `with check` regardless of what the UI offers. Managers have no such bound.
+fails the `with check` regardless of what the UI offers. The manager branch has no such bound.
 
 So the two-role review chain is not a new idea being introduced here. It was declared on
-2026-08-05 and left unused, and this slice is the thing that finally exercises it.
+2026-08-05, merged into its current single-policy form on 2026-08-06, and left unused until
+this slice, which is the thing that finally exercises it. It is also, as shipped, not the
+*only* thing standing between `authenticated` and a direct status write — see Guard 9, below.
 
 ```
                   ┌──────────────── request more evidence ──────────────┐
@@ -166,7 +184,7 @@ Evaluated in order; each raises and rolls back.
 | # | Refuses | Code |
 | --- | --- | --- |
 | 1 | actor is not an active member of `p_workspace_id` | `P0001` |
-| 2 | investigation not found in that workspace | `P0002` |
+| 2 | investigation not found in that workspace | `PT404` |
 | 3 | `p_action` is not one of the five | `P0001` |
 | 4 | `btrim(p_rationale)` is empty, or longer than 2000 characters | `P0001` |
 | 5 | the case has no uploads | `P0001` |
@@ -176,7 +194,11 @@ Evaluated in order; each raises and rolls back.
 | 9 | `approve` / `reject` where the latest `case-recommended` actor is `auth.uid()` | `P0001` |
 
 Error style follows `sentinel_set_display_name`: `P0001` carries a message written for a human
-and surfaced to the UI verbatim, `P0002` means not found.
+and surfaced to the UI verbatim, `PT404` means not found. `PT404` — PostgREST's own
+explicit-status convention, the `PT` prefix plus a three-digit code, rather than a Postgres
+SQLSTATE — is deliberate: `P0002`, the standard plpgsql `no_data_found` code, has no entry in
+PostgREST's default SQLSTATE-to-HTTP-status table and would surface as a bare 500 to a caller
+that reached this RPC straight from the browser, where the status code is part of the contract.
 
 **Guard 5** is the "no decision before analysis" rule. `awaiting-import` in the queue view is
 exactly `pipeline.uploads is null or pipeline.uploads = 0`, so the guard is an `exists` against
@@ -189,9 +211,16 @@ a parallel rule. A manager may recommend on any case; an analyst may recommend o
 own.
 
 **Guard 9** is the separation-of-duties rule and the reason a two-role chain means anything.
-Without it a manager who owns a case clicks twice and the review is theatre. It cannot misfire
-for want of a recommender: `review` is only reachable through a recommendation, so guard 8 has
-already established that one exists.
+Without it a manager who owns a case clicks twice and the review is theatre. It fails closed: it
+looks up the latest `case-recommended` actor and refuses the action if none is found, rather than
+trusting that `review` implies a recommendation exists. That trust would have been misplaced —
+the policy above grants `authenticated` a direct `UPDATE` on `status`, so a manager could `PATCH`
+it straight to `'review'` (or straight to `'approved'`) with no `case-recommended` event ever
+written, which guard 8's status precondition cannot rule out from inside a function with no
+visibility into how `status` reached its current value. The direct-PATCH path is closed a second
+way at the same time, deliberately redundant with guard 9 rather than relied on instead of it:
+`update (status) on sentinel_investigations` is revoked from `authenticated` in the same
+migration that adds this function, so the write guard 9 defends against no longer exists either.
 
 ### Status preconditions (guard 8)
 

@@ -10,6 +10,33 @@
 
 **Spec:** `docs/superpowers/specs/2026-08-10-case-decision-design.md`
 
+## Corrections
+
+This plan is a historical record of what was proposed, not of what shipped — left unedited
+below so nobody loses the reasoning that produced it. Two things changed during execution;
+copy neither the SQL nor the error code below as current without checking the migration.
+
+- **Not-found is `PT404`, not `P0002`.** Every place below that raises or maps `P0002` for
+  guard 2 (the migration SQL at line 379, the client-side test at line 1138, and
+  `mapRpcError` at line 1219) shipped as `PT404` instead. `P0002`, the standard plpgsql
+  `no_data_found` SQLSTATE, has no entry in PostgREST's default SQLSTATE-to-HTTP-status table and surfaces as
+  a bare 500 for an RPC called straight from the browser, where the status code is part of
+  the contract; `PT404` is PostgREST's own explicit-status convention instead. Caught in
+  Task 2's review.
+- **Guard 9 fails closed instead of trusting a recommender exists, and `update (status)` is
+  revoked from `authenticated`.** This plan (and the spec it followed) asserted that "`review`
+  is only reachable through a recommendation," which was false: the foundation migration's two
+  update policies had already been merged, on 2026-08-06, into one granting `authenticated` a
+  direct `UPDATE` on `sentinel_investigations` — any manager unconditionally, an assigned
+  analyst while status is `open`/`review`. A manager could `PATCH` status straight to
+  `'review'` and then approve alone, or straight to `'approved'` with no audit event at all.
+  Caught in Task 1's review; fixed by making guard 9 refuse when no `case-recommended` actor is
+  found, and by revoking the direct-PATCH surface outright rather than relying on either fix
+  alone.
+
+Full detail on both, with the evidence, is in
+`docs/superpowers/follow-ups/2026-08-10-case-decision.md`.
+
 ## Global Constraints
 
 - Branch is `case-decision`, already created from `main` at `4f16f12`. Do not create another.
