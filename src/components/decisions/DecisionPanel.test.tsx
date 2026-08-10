@@ -145,6 +145,7 @@ describe("DecisionPanel", () => {
 
     expect(await screen.findByRole("button", { name: /request more evidence/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^approve$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^reject$/i })).not.toBeInTheDocument();
   });
 
   it("shows the refusal the database returned rather than a generic failure", async () => {

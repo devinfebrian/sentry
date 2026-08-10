@@ -25,11 +25,17 @@ const DECISION_TYPES = new Set<ActivityEntry["type"]>([
   "case-recommended", "case-approved", "case-rejected", "case-evidence-requested",
 ]);
 
-const statusLabels: Record<CaseStatus, string> = {
+// Exported so every place that renders a case's status — this panel and the workspace page
+// heading above it — reads the same label and tone. Two badges deriving their own mapping
+// from the same CaseStatus is exactly how they drift: the page heading used to run
+// caseItem.status.replace("-", " ") (a no-op; no CaseStatus value has a hyphen) with its own
+// ad hoc tone rule, so "review" showed as "review" there and "Pending approval" here, and
+// "closed" painted tone "action" up top and "risk" down here.
+export const statusLabels: Record<CaseStatus, string> = {
   open: "Open", review: "Pending approval", approved: "Approved", closed: "Closed",
 };
 
-const statusTones: Record<CaseStatus, "neutral" | "action" | "confirm" | "risk"> = {
+export const statusTones: Record<CaseStatus, "neutral" | "action" | "confirm" | "risk"> = {
   open: "neutral", review: "action", approved: "confirm", closed: "risk",
 };
 
@@ -51,7 +57,7 @@ const actionLabels: Record<DecisionAction, string> = {
 export function DecisionPanel({
   caseItem, viewerId, role, decisionService, activityService, memberNames, onDecided,
 }: DecisionPanelProps) {
-  const { state } = useActivityFeed({
+  const { state, reload } = useActivityFeed({
     activity: activityService, memberNames, investigationId: caseItem.databaseId,
   });
   const [pending, setPending] = useState<DecisionAction | null>(null);
@@ -69,18 +75,22 @@ export function DecisionPanel({
   // history below renders, and `decisions` comes back empty on two paths that are not the
   // same claim. One is a loaded feed capped at DEFAULT_ACTIVITY_LIMIT (50, newest first, see
   // sentinelActivity.ts) where the recommending event has aged off the read. The other, more
-  // likely in ordinary operation, is the feed simply not having loaded — `activityService`
-  // absent, or the `list()` call failed — which `useActivityFeed` reports as its own error
-  // state, not as an empty feed. Both leave `lastRecommender` null, but only the first is
-  // safe ground for "nobody has recommended, so Approve/Reject are fine": the second means
-  // this panel cannot tell, and `available` below treats a feed-error on a review case as
-  // its own case rather than folding it into "recommendedThis === false", so it does not
-  // hand out a control that would always fail. Either way this stays a misleading-button
-  // risk, not a data-integrity one: guard 9 in sentinel_record_decision reads the
-  // recommender from the table directly, not from this feed, so a write that slipped past
-  // this panel's caution is still refused, and the database's own refusal is what the alert
-  // shows.
-  const feedUnavailable = state.status === "error";
+  // likely in ordinary operation, is the feed simply not having loaded yet, or having failed
+  // to load — `activityService` absent, the `list()` call still in flight, or it having
+  // failed — which `useActivityFeed` reports as its own `loading` or `error` state, not as an
+  // empty feed. Both leave `lastRecommender` null, but only the first is safe ground for
+  // "nobody has recommended, so Approve/Reject are fine": the second means this panel cannot
+  // tell yet, and `available` below treats an unresolved feed on a review case as its own
+  // case rather than folding it into "recommendedThis === false", so it does not hand out a
+  // control that would always fail. `feedUnavailable` covers `loading` as well as `error`
+  // (rather than only `error`) so this withholding starts the moment the panel mounts, not
+  // only once a load has had the chance to fail — closing the window where Approve/Reject
+  // rendered for the fraction of a second before the feed resolved. Either way this stays a
+  // misleading-button risk, not a data-integrity one: guard 9 in sentinel_record_decision
+  // reads the recommender from the table directly, not from this feed, so a write that
+  // slipped past this panel's caution is still refused, and the database's own refusal is
+  // what the alert shows.
+  const feedUnavailable = state.status !== "ready";
   const lastRecommender = decisions.find((entry) => entry.type === "case-recommended")?.actorId ?? null;
   const isOwner = Boolean(viewerId) && caseItem.ownerId === viewerId;
   const isManager = role === "manager";
@@ -104,6 +114,12 @@ export function DecisionPanel({
 
   const withheldReason = (() => {
     if (available.length > 0) return null;
+    // Checked first and independently of status: with no decisionService, `available` is
+    // empty for every status, including "open" — where the next branch would otherwise tell
+    // the assigned analyst on their own open case that only the assigned analyst or a
+    // manager can recommend on it, which is false. The actual reason is that recording is
+    // unavailable, not that this viewer lacks standing.
+    if (!decisionService) return "Decision recording is unavailable. Sign in again and retry.";
     if (caseItem.status === "open") return "Only the assigned analyst or a manager can recommend on this case.";
     if (!isManager) return "A manager decides this case once a recommendation is recorded.";
     return null;
@@ -132,6 +148,7 @@ export function DecisionPanel({
       await decisionService.record(caseItem.databaseId, pending, trimmed);
       setPending(null);
       setRationale("");
+      reload();
       onDecided();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to record decision.");

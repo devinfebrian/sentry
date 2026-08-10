@@ -217,6 +217,39 @@ describe("CaseWorkspacePage", () => {
   });
 });
 
+describe("CaseWorkspacePage heading status badge", () => {
+  // The page heading badge and DecisionPanel's own badge render the same caseItem.status
+  // through the same statusLabels/statusTones exported from DecisionPanel.tsx, so they
+  // cannot drift the way they used to: the heading used to run
+  // caseItem.status.replace("-", " ") (a no-op — no CaseStatus value has a hyphen) with its
+  // own ad hoc tone rule, so a case in "review" showed "review" up top and "Pending
+  // approval" in the panel below it.
+  it("shows the mapped status label, not the raw status string", async () => {
+    const reviewCase: CaseSummary = { ...importedCase, id: "INV-REVIEW1", status: "review" };
+    const service = { getById: vi.fn(async () => reviewCase) };
+
+    const { container } = renderWorkspace(service, "summary");
+
+    await screen.findByRole("heading", { name: /investigation summary/i });
+    const badge = container.querySelector(".page-heading-simple .status-badge");
+    expect(badge).not.toBeNull();
+    expect(badge).toHaveTextContent("Pending approval");
+    expect(badge!.className).toContain("status-action");
+  });
+
+  it("paints a closed case with the risk tone, matching the panel rather than the old action/confirm split", async () => {
+    const closedCase: CaseSummary = { ...importedCase, id: "INV-CLOSED1", status: "closed" };
+    const service = { getById: vi.fn(async () => closedCase) };
+
+    const { container } = renderWorkspace(service, "summary");
+
+    await screen.findByRole("heading", { name: /investigation summary/i });
+    const badge = container.querySelector(".page-heading-simple .status-badge");
+    expect(badge).toHaveTextContent("Closed");
+    expect(badge!.className).toContain("status-risk");
+  });
+});
+
 describe("CaseWorkspacePage decision step", () => {
   // The decision step's static page heading (from stepCopy) always reads "Decision record",
   // whether or not the panel below it is built — so a "heading named Decision record" query

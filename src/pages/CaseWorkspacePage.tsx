@@ -4,7 +4,7 @@ import { AnalysisNotStartedState } from "../components/cases/AnalysisNotStartedS
 import { AnalysisUnavailableState } from "../components/cases/AnalysisUnavailableState";
 import { StepNotBuiltState } from "../components/cases/StepNotBuiltState";
 import { CaseHeader } from "../components/cases/CaseHeader";
-import { DecisionPanel } from "../components/decisions/DecisionPanel";
+import { DecisionPanel, statusLabels, statusTones } from "../components/decisions/DecisionPanel";
 import { AgentPipeline } from "../components/operations/AgentPipeline";
 import { StatusBadge } from "../components/ui/StatusBadge";
 import { Button } from "../components/ui/Button";
@@ -167,7 +167,7 @@ export function CaseWorkspacePage({ investigationService, uploadService, activit
     <div className="case-workspace-page">
       <CaseHeader caseItem={caseItem} currentStep={step} />
       <div className="case-workspace-content">
-        <header className="page-heading page-heading-simple"><div><span className="eyebrow">{content.eyebrow}</span><h2>{content.title}</h2><p>{content.description}</p></div><StatusBadge status={caseItem.status} label={caseItem.status.replace("-", " ")} tone={caseItem.status === "approved" ? "confirm" : "action"} /></header>
+        <header className="page-heading page-heading-simple"><div><span className="eyebrow">{content.eyebrow}</span><h2>{content.title}</h2><p>{content.description}</p></div><StatusBadge status={caseItem.status} label={statusLabels[caseItem.status]} tone={statusTones[caseItem.status]} /></header>
         {demoData ? (
           <>
             {step === "summary" && <><AgentPipeline stages={demoData.pipeline} /><section className="workspace-summary-grid"><div className="summary-note"><span className="section-kicker">Risk signal</span><strong>Beneficiary mismatch needs enhanced review.</strong><p>Two supporting evidence records and one contradictory record are linked to this case.</p></div><div className="summary-note"><span className="section-kicker">Next action</span><strong>Confirm alternate beneficiary notice.</strong><p>Decision stays pending until source package is complete.</p></div></section></>}
