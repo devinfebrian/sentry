@@ -202,7 +202,7 @@ export function CaseWorkspacePage({ investigationService, uploadService, activit
             {/* Still true wherever analysis produced nothing — a clean import genuinely
                 has no findings, and the other steps have no implementation at all. */}
             {!analysisFailed && !analysisHasBegun && (
-              <AnalysisNotStartedState step={step} />
+              <AnalysisNotStartedState step={step} stage={caseItem.stageId} />
             )}
             {step === "summary" && (
               <CaseActivityPanel

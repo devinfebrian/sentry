@@ -1,3 +1,5 @@
+import { CASE_STAGE_LABELS } from "../../domain/caseStages";
+import type { CaseStage } from "../../domain/types";
 import { StatusBadge } from "../ui/StatusBadge";
 
 const stepDescriptions: Record<string, string> = {
@@ -8,7 +10,7 @@ const stepDescriptions: Record<string, string> = {
   report: "A report will be available after analysis and decision review are complete.",
 };
 
-export function AnalysisNotStartedState({ step }: { step: string }) {
+export function AnalysisNotStartedState({ step, stage }: { step: string; stage?: CaseStage }) {
   return (
     <section className="state-panel" aria-labelledby="analysis-not-started-title">
       <span className="state-kicker">Analysis status</span>
@@ -16,7 +18,7 @@ export function AnalysisNotStartedState({ step }: { step: string }) {
       <p>{stepDescriptions[step] ?? "Analysis has not started for this investigation."}</p>
       <div role="status" aria-live="polite">
         <StatusBadge status="not-assessed" label="Risk: Not assessed" tone="neutral" />
-        <span>Stage: Analysis not started</span>
+        {stage && <span>Stage: {CASE_STAGE_LABELS[stage]}</span>}
       </div>
     </section>
   );

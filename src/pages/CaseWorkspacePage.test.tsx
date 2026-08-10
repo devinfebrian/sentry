@@ -116,6 +116,9 @@ describe("CaseWorkspacePage", () => {
 
       expect(await screen.findByRole("heading", { name: /imported company/i })).toBeInTheDocument();
       expect(screen.getAllByText("Analysis not started").length).toBeGreaterThan(0);
+      // importedCase's stageId is "awaiting-import", which has no upload at all — distinct
+      // from the adjacent "awaiting-analysis" stage this label used to claim regardless.
+      expect(screen.getAllByText("Stage: Awaiting import").length).toBeGreaterThan(0);
       expect(screen.getAllByText("Not assessed").length).toBeGreaterThan(0);
       expect(screen.queryByText("Beneficiary mismatch warrants enhanced review before payment release.")).not.toBeInTheDocument();
       expect(screen.queryByRole("heading", { name: /case workspace unavailable/i })).not.toBeInTheDocument();
