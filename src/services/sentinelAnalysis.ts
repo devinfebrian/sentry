@@ -18,6 +18,7 @@ type FindingRow = {
   agent: string;
   summary: string;
   confidence: number;
+  severity: "low" | "medium" | "high" | null;
   created_at: string;
   sentinel_evidence: EvidenceRow[] | null;
 };
@@ -47,7 +48,7 @@ export type SentinelAnalysisClient = {
 export const EVIDENCE_RELATIONSHIP = "sentinel_evidence!sentinel_evidence_workspace_finding_fkey";
 
 export const ANALYSIS_COLUMNS =
-  "id, investigation_id, rule, agent, summary, confidence, created_at, "
+  "id, investigation_id, rule, agent, summary, confidence, severity, created_at, "
   + `${EVIDENCE_RELATIONSHIP}(id, source_row, source_label, claim, relevance, state, created_at)`;
 
 /** Bounded like every other read here — an analysis re-run only ever adds rows. */
@@ -101,8 +102,7 @@ export function createSentinelAnalysisService(
           agent: row.agent,
           summary: row.summary,
           confidence: row.confidence,
-          // Not yet selected from sentinel_findings.severity — this read path predates it.
-          severity: null,
+          severity: row.severity,
           // The domain splits evidence by relevance; the table stores it as one column.
           evidenceIds: linked.filter((item) => item.relevance === "supporting").map((item) => item.id),
           contradictoryEvidenceIds: linked.filter((item) => item.relevance === "contradictory").map((item) => item.id),

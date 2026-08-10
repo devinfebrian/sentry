@@ -18,6 +18,7 @@ const findingRow = {
   agent: "Financial analysis",
   summary: "Whale records 400, 4x the median of 100",
   confidence: 1,
+  severity: null,
   created_at: "2026-08-09T09:00:00.000Z",
   sentinel_evidence: [
     {
@@ -118,6 +119,23 @@ describe("createSentinelAnalysisService", () => {
 
     expect(findings[0].evidenceIds).toEqual([]);
     expect(evidence).toEqual([]);
+  });
+
+  it("carries each finding's severity, and null where no producer rated it", async () => {
+    const rated: FindingRow = { ...findingRow, id: "f1", severity: "high" };
+    const unrated: FindingRow = {
+      ...findingRow,
+      id: "f2",
+      agent: "Fraud pattern investigator",
+      rule: "round-number-clustering",
+      confidence: 0.9,
+      severity: null,
+    };
+    const { service } = serviceFor(Promise.resolve(listResponse([rated, unrated])));
+    const { findings } = await service.list(investigationId);
+
+    expect(findings[0].severity).toBe("high");
+    expect(findings[1].severity).toBeNull();
   });
 
   it("wraps a denied read in a readable message", async () => {
