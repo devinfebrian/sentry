@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, Navigate, useParams } from "react-router-dom";
 import { AnalysisNotStartedState } from "../components/cases/AnalysisNotStartedState";
 import { AnalysisUnavailableState } from "../components/cases/AnalysisUnavailableState";
+import { StepNotBuiltState } from "../components/cases/StepNotBuiltState";
 import { CaseHeader } from "../components/cases/CaseHeader";
 import { AgentPipeline } from "../components/operations/AgentPipeline";
 import { StatusBadge } from "../components/ui/StatusBadge";
@@ -146,9 +147,15 @@ export function CaseWorkspacePage({ investigationService, uploadService, activit
    * On findings and evidence that means findings exist. On summary it means an agent run
    * exists — including one that is waiting or failed, because a pipeline showing a failed
    * stage next to the words "Analysis not started" tells the reader two different things.
+   *
+   * Decision and report have no producer of their own to check, but they must not claim
+   * "not started" once the case's own stage says otherwise — caseItem.stageId is read
+   * straight off the persisted case rather than through the agent-runs hook, so this does
+   * not wait on a second fetch to stop contradicting the header next to it.
    */
   const analysisHasBegun = (hasFindings && (step === "findings" || step === "evidence"))
-    || (step === "summary" && (hasRuns || agentRuns.state.status === "error"));
+    || (step === "summary" && (hasRuns || agentRuns.state.status === "error"))
+    || ((step === "decision" || step === "report") && caseItem.stageId !== "awaiting-import");
 
   const findings = demoData?.findings.filter((finding) => finding.caseId === caseItem.id) ?? [];
   return (
@@ -199,10 +206,17 @@ export function CaseWorkspacePage({ investigationService, uploadService, activit
 
             {analysisFailed && <AnalysisUnavailableState />}
 
-            {/* Still true wherever analysis produced nothing — a clean import genuinely
-                has no findings, and the other steps have no implementation at all. */}
+            {/* Still true wherever analysis genuinely has not begun — a case still
+                awaiting import, on any step. */}
             {!analysisFailed && !analysisHasBegun && (
               <AnalysisNotStartedState step={step} stage={caseItem.stageId} />
+            )}
+
+            {/* Decision and report have no implementation regardless of stage. Once
+                analysisHasBegun is true for these steps, say that plainly instead of
+                falling through to a panel that would call the case unanalysed. */}
+            {!analysisFailed && analysisHasBegun && (step === "decision" || step === "report") && (
+              <StepNotBuiltState step={step} stage={caseItem.stageId} risk={caseItem.risk} />
             )}
             {step === "summary" && (
               <CaseActivityPanel
