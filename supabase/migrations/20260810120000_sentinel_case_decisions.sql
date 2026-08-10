@@ -109,7 +109,13 @@ begin
   for update;
 
   if not found then
-    raise exception using errcode = 'P0002', message = 'Investigation not found.';
+    -- PT404 is PostgREST's own convention, not a Postgres SQLSTATE: the PT prefix plus a
+    -- three-digit code sets the HTTP status directly. P0002 (the standard plpgsql
+    -- no_data_found code) has no entry in PostgREST's default SQLSTATE-to-status mapping and
+    -- surfaced as a bare 500, misleading a caller into treating a routine miss as a server
+    -- fault. This function is called straight from the browser, so the status code is part
+    -- of the contract, not an implementation detail.
+    raise exception using errcode = 'PT404', message = 'Investigation not found.';
   end if;
 
   -- Guard 3: known action.
@@ -253,3 +259,41 @@ grant execute on function public.sentinel_record_decision(uuid, uuid, text, text
 -- rather than be re-litigated per policy.
 
 revoke update (status) on public.sentinel_investigations from authenticated;
+
+-- --------------------------------------------------------------------------------------
+-- 5. A narrow escape hatch for end-to-end test cleanup
+-- --------------------------------------------------------------------------------------
+-- sentinel_activity_events is append-only by grant omission: the foundation migration
+-- revokes all privileges on it and grants only insert to service_role, so that no session —
+-- including one holding the service-role key — can rewrite or erase the audit trail. That
+-- omission was always aimed at authenticated, the role every real user and every RLS policy
+-- in this schema runs as; it was never meant to stop this project's own disposable test
+-- fixtures from being cleaned up, but service_role has no more DELETE on this table than
+-- authenticated does, so the decisions e2e suite's teardown was silently failing (a 403 on
+-- every run, never checked) and case-* events from every test run were piling up forever.
+--
+-- This function is the fix, and it is deliberately narrow: it deletes only the case-*
+-- events (the ones this migration's own actions produce) belonging to one named
+-- investigation, nothing else, and only service_role may call it — authenticated still has
+-- no path to erase an event, so the append-only guarantee against the role it was built to
+-- constrain is untouched.
+create or replace function public.sentinel_purge_case_decision_events(
+  p_investigation_id uuid
+) returns integer
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $function$
+declare
+  v_removed integer;
+begin
+  delete from public.sentinel_activity_events as e
+  where e.investigation_id = p_investigation_id
+    and e.event_type like 'case-%';
+  get diagnostics v_removed = row_count;
+  return v_removed;
+end;
+$function$;
+
+revoke all on function public.sentinel_purge_case_decision_events(uuid) from public, anon, authenticated;
+grant execute on function public.sentinel_purge_case_decision_events(uuid) to service_role;

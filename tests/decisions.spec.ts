@@ -120,12 +120,23 @@ async function seedCase(options: { workspaceId: string; ownerId: string; withUpl
 }
 
 /**
- * Events must go first. sentinel_activity_events.investigation_id is `on delete set null`,
- * so deleting the case first would orphan its events into the workspace feed rather than
- * remove them.
+ * Events must go first, and specifically through the purge RPC, not a REST DELETE.
+ * sentinel_activity_events is append-only by grant omission -- service_role has only
+ * INSERT on it, the same as authenticated -- so a direct DELETE here always 403s. That 403
+ * was previously swallowed silently: the investigation still got removed afterward, and
+ * because investigation_id is `on delete set null`, its events survived as orphans instead
+ * of being removed, accumulating across every run of this file. sentinel_purge_case_
+ * decision_events is the one path narrow enough to be granted to service_role without
+ * reopening the audit trail to authenticated, so it runs first, and its result is checked:
+ * a cleanup that fails silently is exactly how the previous bug went unnoticed.
  */
 async function removeCase(seeded: SeededCase) {
-  await adminRest(`sentinel_activity_events?investigation_id=eq.${seeded.id}`, { method: "DELETE" });
+  const purged = await adminRest("rpc/sentinel_purge_case_decision_events", {
+    method: "POST",
+    body: JSON.stringify({ p_investigation_id: seeded.id }),
+  });
+  expect(purged.status, `purge case-* events: ${JSON.stringify(purged.body)}`).toBeLessThan(300);
+
   await adminRest(`sentinel_uploads?investigation_id=eq.${seeded.id}`, { method: "DELETE" });
   await adminRest(`sentinel_investigations?id=eq.${seeded.id}`, { method: "DELETE" });
 }
@@ -259,12 +270,11 @@ test.describe("recording a decision", () => {
       action: "recommend-approve", rationale: "Fine.",
     });
 
-    // The brief assumed PostgREST maps P0002 to 404, matching P0001's mapping to 400. It
-    // does not: P0002 falls outside PostgREST's default PL/pgSQL exception mapping and comes
-    // back as 500, confirmed directly against this project with `code: "P0002"` still intact
-    // in the body. The outcome that actually matters -- the case lookup failing closed with
-    // the right message -- is unaffected, so the SQL is not the thing to change here.
-    expect(response.status).toBe(500);
+    // Guard 2 raises errcode 'PT404' -- PostgREST's own PT### convention for setting the
+    // HTTP status directly, not a Postgres SQLSTATE -- because plain P0002 has no entry in
+    // PostgREST's default exception mapping and surfaced as a bare 500. Confirmed live
+    // against this project: {"code":"PT404","message":"Investigation not found."} at 404.
+    expect(response.status).toBe(404);
     expect(response.body.message).toMatch(/investigation not found/i);
   });
 
