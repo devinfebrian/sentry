@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { requireCredentials, requireServiceRoleKey, storageStatePath } from "./env";
 
-const { supabaseUrl, publishableKey } = requireCredentials("manager");
+const { supabaseUrl, publishableKey } = requireCredentials("analyst");
 
 // Decisions advance status and append events. Unlike re-running an agent, they are not
 // idempotent, so this file never races itself over a shared fixture.
@@ -125,20 +125,27 @@ async function seedCase(options: { workspaceId: string; ownerId: string; withUpl
  * INSERT on it, the same as authenticated -- so a direct DELETE here always 403s. That 403
  * was previously swallowed silently: the investigation still got removed afterward, and
  * because investigation_id is `on delete set null`, its events survived as orphans instead
- * of being removed, accumulating across every run of this file. sentinel_purge_case_
- * decision_events is the one path narrow enough to be granted to service_role without
- * reopening the audit trail to authenticated, so it runs first, and its result is checked:
- * a cleanup that fails silently is exactly how the previous bug went unnoticed.
+ * of being removed, accumulating across every run of this file. sentinel_purge_investigation_
+ * events is the one path narrow enough to be granted to service_role without reopening the
+ * audit trail to authenticated, so it runs first, scoped to every event this investigation's
+ * fixtures produced (not only case-* -- seeding it also fires the foundation triggers that
+ * write investigation-created and upload-created), and its result is checked: a cleanup that
+ * fails silently is exactly how the previous bug went unnoticed. The two DELETEs after it are
+ * checked for the same reason -- an unchecked teardown call is exactly the shape of bug this
+ * docstring is about, so leaving these two unchecked would repeat it one statement down.
  */
 async function removeCase(seeded: SeededCase) {
-  const purged = await adminRest("rpc/sentinel_purge_case_decision_events", {
+  const purged = await adminRest("rpc/sentinel_purge_investigation_events", {
     method: "POST",
     body: JSON.stringify({ p_investigation_id: seeded.id }),
   });
-  expect(purged.status, `purge case-* events: ${JSON.stringify(purged.body)}`).toBeLessThan(300);
+  expect(purged.status, `purge investigation events: ${JSON.stringify(purged.body)}`).toBeLessThan(300);
 
-  await adminRest(`sentinel_uploads?investigation_id=eq.${seeded.id}`, { method: "DELETE" });
-  await adminRest(`sentinel_investigations?id=eq.${seeded.id}`, { method: "DELETE" });
+  const uploadsRemoved = await adminRest(`sentinel_uploads?investigation_id=eq.${seeded.id}`, { method: "DELETE" });
+  expect(uploadsRemoved.status, `delete seeded uploads: ${JSON.stringify(uploadsRemoved.body)}`).toBeLessThan(300);
+
+  const investigationRemoved = await adminRest(`sentinel_investigations?id=eq.${seeded.id}`, { method: "DELETE" });
+  expect(investigationRemoved.status, `delete seeded investigation: ${JSON.stringify(investigationRemoved.body)}`).toBeLessThan(300);
 }
 
 async function signedInToken(page: Page) {
@@ -489,6 +496,58 @@ test.describe("deciding a recommended case", () => {
         expect(types).toEqual(
           expect.arrayContaining(["case-recommended", "case-approved", "case-evidence-requested"]),
         );
+      } finally {
+        await removeCase(seeded);
+      }
+    } finally {
+      await analystContext.close();
+    }
+  });
+
+  // Nothing else in this file exercises the `reject` action or the `else` branches at the
+  // migration's guard 8 (`v_next_status := ... else 'closed' end`, `v_event_type := ... else
+  // 'case-rejected' end). Without this, a regression that swapped the two destinations --
+  // approve writing 'closed', reject writing 'approved' -- would pass every other test in
+  // this file. Mirrors the approve walkthrough above, one action over.
+  test("a manager rejects a case somebody else recommended", async ({ page, browser }) => {
+    const managerToken = await signedInToken(page);
+    const managerId = subjectOf(managerToken);
+    const workspaceId = await workspaceIdFor(managerToken);
+
+    const analystContext = await browser.newContext({ storageState: storageStatePath("analyst") });
+    try {
+      const analystPage = await analystContext.newPage();
+      const analystToken = await signedInToken(analystPage);
+      const analystId = subjectOf(analystToken);
+      const seeded = await seedCase({ workspaceId, ownerId: analystId, withUpload: true });
+
+      try {
+        expect((await decide(analystToken, {
+          investigationId: seeded.id, workspaceId,
+          action: "recommend-approve", rationale: "Looks fine on first pass.",
+        })).status).toBe(200);
+
+        const rejected = await decide(managerToken, {
+          investigationId: seeded.id, workspaceId, action: "reject", rationale: "Evidence does not support this.",
+        });
+        expect(rejected.status, JSON.stringify(rejected.body)).toBe(200);
+        expect(rejected.body.status).toBe("closed");
+
+        const investigation = await rest(managerToken, `sentinel_investigations?select=status&id=eq.${seeded.id}`);
+        expect(investigation.body[0].status).toBe("closed");
+
+        const events = await rest(
+          managerToken,
+          `sentinel_activity_events?select=event_type,actor_id,rationale,metadata&investigation_id=eq.${seeded.id}&event_type=eq.case-rejected`,
+        );
+        expect(events.body).toHaveLength(1);
+        expect(events.body[0].actor_id).toBe(managerId);
+        expect(events.body[0].rationale).toBe("Evidence does not support this.");
+        expect(events.body[0].metadata).toMatchObject({
+          from_status: "review",
+          to_status: "closed",
+          recommendation: "reject",
+        });
       } finally {
         await removeCase(seeded);
       }

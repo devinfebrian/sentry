@@ -1,10 +1,11 @@
 -- A case can now carry a decision somebody actually made.
 --
 -- status has held 'open' on every investigation ever created: create() writes it once and
--- nothing has moved it since, so the CaseHeader badge reports a constant as though it were
--- state. The two-role chain below is not new either — the foundation migration wrote an
--- analyst update policy bounded on both sides by status in ('open','review') and a manager
--- policy without that bound, then never exercised either.
+-- nothing has moved it since, so the status StatusBadge in CaseWorkspacePage.tsx reports a
+-- constant as though it were state. (CaseHeader's own badge is unrelated and unaffected — it
+-- renders risk, not status.) The two-role chain below is not new either — the foundation
+-- migration wrote an analyst update policy bounded on both sides by status in
+-- ('open','review') and a manager policy without that bound, then never exercised either.
 
 -- --------------------------------------------------------------------------------------
 -- 1. Decisions join the audit vocabulary
@@ -270,14 +271,30 @@ revoke update (status) on public.sentinel_investigations from authenticated;
 -- in this schema runs as; it was never meant to stop this project's own disposable test
 -- fixtures from being cleaned up, but service_role has no more DELETE on this table than
 -- authenticated does, so the decisions e2e suite's teardown was silently failing (a 403 on
--- every run, never checked) and case-* events from every test run were piling up forever.
+-- every run, never checked) and events from every test run were piling up forever.
 --
--- This function is the fix, and it is deliberately narrow: it deletes only the case-*
--- events (the ones this migration's own actions produce) belonging to one named
--- investigation, nothing else, and only service_role may call it — authenticated still has
--- no path to erase an event, so the append-only guarantee against the role it was built to
--- constrain is untouched.
-create or replace function public.sentinel_purge_case_decision_events(
+-- The first version of this function purged only case-* events, on the theory that those
+-- were the only ones this migration's fixtures produced. That theory was wrong: seeding a
+-- fixture also fires two foundation triggers (20260809000000_sentinel_identity_and_activity.sql)
+-- that each insert their own event — investigation-created, upload-created — neither of
+-- which matches 'case-%'. Deleting the investigation afterward orphaned both of them
+-- (investigation_id is `on delete set null`), and they rendered on /activity forever, ~24
+-- permanent rows per full e2e run. Widened to every event for the one named investigation
+-- and renamed to match: keeping the old name over a widened predicate would have been a lie
+-- in the schema. The widening is safe specifically because the investigation is deleted in
+-- the very next statement by the caller — an orphaned event is worse than no event, and
+-- there is no later point at which these rows could still matter.
+--
+-- Still deliberately narrow along the axis that actually needs guarding: it touches only
+-- rows belonging to one named investigation, and only service_role may call it —
+-- authenticated still has no path to erase an event, so the append-only guarantee against
+-- the role it was built to constrain is untouched. No other credential can do this: RLS
+-- grants authenticated only SELECT on sentinel_activity_events, and service_role's own
+-- table-level grant is INSERT-only, so a plain DELETE 403s for either — this security
+-- definer function is the one narrow, intentional bypass, scoped to test teardown.
+drop function if exists public.sentinel_purge_case_decision_events(uuid);
+
+create or replace function public.sentinel_purge_investigation_events(
   p_investigation_id uuid
 ) returns integer
 language plpgsql
@@ -288,12 +305,19 @@ declare
   v_removed integer;
 begin
   delete from public.sentinel_activity_events as e
-  where e.investigation_id = p_investigation_id
-    and e.event_type like 'case-%';
+  where e.investigation_id = p_investigation_id;
   get diagnostics v_removed = row_count;
   return v_removed;
 end;
 $function$;
 
-revoke all on function public.sentinel_purge_case_decision_events(uuid) from public, anon, authenticated;
-grant execute on function public.sentinel_purge_case_decision_events(uuid) to service_role;
+revoke all on function public.sentinel_purge_investigation_events(uuid) from public, anon, authenticated;
+grant execute on function public.sentinel_purge_investigation_events(uuid) to service_role;
+
+comment on function public.sentinel_purge_investigation_events(uuid) is
+  'Test support only. sentinel_activity_events is append-only by grant omission -- '
+  'authenticated has SELECT only and service_role has INSERT only, so no ordinary '
+  'credential can run this DELETE; this security definer function is the sole, narrow '
+  'exception, granted to service_role alone for e2e teardown. Deliberately scoped to every '
+  'event belonging to one named investigation, no more -- called immediately before that '
+  'investigation itself is deleted, so nothing it removes could ever be read again.';

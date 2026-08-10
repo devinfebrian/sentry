@@ -116,21 +116,26 @@ async function seedDecidableCase(options: { workspaceId: string; ownerId: string
  * sentinel_activity_events is append-only by grant omission -- service_role has only INSERT
  * on it, so a direct DELETE always 403s. That 403 was previously swallowed silently: the
  * investigation still got removed afterward, and because investigation_id is `on delete set
- * null`, its events survived as orphans instead of being removed. sentinel_purge_case_
- * decision_events is the one path narrow enough to be granted to service_role without
- * reopening the audit trail to authenticated, so it runs first, and its result is checked --
- * a cleanup that fails silently is exactly how that bug went unnoticed. Mirrors
- * decisions.spec.ts's removeCase.
+ * null`, its events survived as orphans instead of being removed. sentinel_purge_investigation_
+ * events is the one path narrow enough to be granted to service_role without reopening the
+ * audit trail to authenticated, so it runs first, scoped to every event this investigation's
+ * fixtures produced (not only case-* -- seeding it also fires the foundation triggers that
+ * write investigation-created and upload-created), and its result is checked -- a cleanup
+ * that fails silently is exactly how that bug went unnoticed. The two DELETEs after it are
+ * checked for the same reason. Mirrors decisions.spec.ts's removeCase.
  */
 async function removeSeededCase(id: string) {
-  const purged = await adminRest("rpc/sentinel_purge_case_decision_events", {
+  const purged = await adminRest("rpc/sentinel_purge_investigation_events", {
     method: "POST",
     body: JSON.stringify({ p_investigation_id: id }),
   });
-  expect(purged.status, `purge case-* events: ${JSON.stringify(purged.body)}`).toBeLessThan(300);
+  expect(purged.status, `purge investigation events: ${JSON.stringify(purged.body)}`).toBeLessThan(300);
 
-  await adminRest(`sentinel_uploads?investigation_id=eq.${id}`, { method: "DELETE" });
-  await adminRest(`sentinel_investigations?id=eq.${id}`, { method: "DELETE" });
+  const uploadsRemoved = await adminRest(`sentinel_uploads?investigation_id=eq.${id}`, { method: "DELETE" });
+  expect(uploadsRemoved.status, `delete seeded uploads: ${JSON.stringify(uploadsRemoved.body)}`).toBeLessThan(300);
+
+  const investigationRemoved = await adminRest(`sentinel_investigations?id=eq.${id}`, { method: "DELETE" });
+  expect(investigationRemoved.status, `delete seeded investigation: ${JSON.stringify(investigationRemoved.body)}`).toBeLessThan(300);
 }
 
 function importDialog(page: Page) {
@@ -623,8 +628,14 @@ test.describe("deciding a case", () => {
       await page.getByRole("button", { name: /^record decision$/i }).click();
 
       // Assert the positive before any absence: this proves the panel re-rendered on real
-      // data, which is what makes the missing-button check below mean anything.
-      await expect(page.getByText("Pending approval")).toBeVisible();
+      // data, which is what makes the missing-button check below mean anything. The page
+      // heading badge above the panel now shares the same statusLabels mapping (the Important-1
+      // fix for the two badges drifting), so "Pending approval" legitimately renders twice on
+      // this page; scoping to the panel's own region keeps this assertion pinned to the one
+      // element it means to check, same as the "Approved" assertion further down.
+      await expect(
+        page.getByRole("region", { name: "Decision record" }).getByText("Pending approval", { exact: true }),
+      ).toBeVisible();
       await expect(page.getByText("Outlier is the annual settlement, confirmed against the ledger.")).toBeVisible();
       await expect(page.getByRole("button", { name: /recommend approve/i })).toHaveCount(0);
 
