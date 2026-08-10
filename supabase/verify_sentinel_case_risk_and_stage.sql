@@ -1,4 +1,4 @@
--- Verifies 20260810120000_sentinel_case_risk_and_stage.sql against a live database.
+-- Verifies 20260810060036_sentinel_case_risk_and_stage.sql against a live database.
 --
 -- Signatures are matched with oidvectortypes(proargtypes), never
 -- pg_get_function_identity_arguments, which returns parameter names on this server and so
