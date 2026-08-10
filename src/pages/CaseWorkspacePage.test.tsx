@@ -12,11 +12,10 @@ const importedCase: CaseSummary = {
   entity: "Imported Company",
   owner: "test-user",
   risk: "not-assessed",
-  stageId: "not-started",
+  stageId: "awaiting-import",
   status: "open",
   ageDays: 0,
   lastActivity: "2026-08-06T10:00:00.000Z",
-  analysisStatus: "not-started",
 };
 
 function renderWorkspace(
@@ -91,6 +90,20 @@ describe("CaseWorkspacePage analysis", () => {
     expect(await screen.findByRole("heading", { name: /analysis not started/i })).toBeInTheDocument();
   });
 
+  it("says the step is not built rather than that analysis has not started, once the case is analysed", async () => {
+    // Regression coverage for the panel contradicting itself: a case at stage "analysed"
+    // with findings on record must never render "Analysis not started" on decision or
+    // report just because those two steps have no producer of their own.
+    const analysedCase: CaseSummary = { ...importedCase, id: "INV-ANALYSED1", stageId: "analysed", risk: "high" };
+    const analysedService = { getById: vi.fn(async () => analysedCase) };
+
+    renderWorkspace(analysedService, "decision", { analysisService: analysisWith([realFinding], [realEvidence]) });
+
+    expect(await screen.findByRole("heading", { name: /this step is not built yet/i })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /analysis not started/i })).not.toBeInTheDocument();
+    expect(screen.getByText("Stage: Analysed")).toBeInTheDocument();
+  });
+
   it("says the analysis could not be loaded rather than that none was started", async () => {
     // A failed read is not an absence of findings. Reporting it as "not started" hid a
     // broken query behind a plausible-looking empty state for an entire slice.
@@ -117,6 +130,9 @@ describe("CaseWorkspacePage", () => {
 
       expect(await screen.findByRole("heading", { name: /imported company/i })).toBeInTheDocument();
       expect(screen.getAllByText("Analysis not started").length).toBeGreaterThan(0);
+      // importedCase's stageId is "awaiting-import", which has no upload at all — distinct
+      // from the adjacent "awaiting-analysis" stage this label used to claim regardless.
+      expect(screen.getAllByText("Stage: Awaiting import").length).toBeGreaterThan(0);
       expect(screen.getAllByText("Not assessed").length).toBeGreaterThan(0);
       expect(screen.queryByText("Beneficiary mismatch warrants enhanced review before payment release.")).not.toBeInTheDocument();
       expect(screen.queryByRole("heading", { name: /case workspace unavailable/i })).not.toBeInTheDocument();

@@ -8,6 +8,12 @@
  * These keys are mirrored by a CHECK constraint on sentinel_findings.agent_key and
  * sentinel_agent_runs.agent_key. Adding a producer means a migration, on purpose: an
  * agent_key the database does not recognise would own no findings and fail silently.
+ *
+ * sentinel_investigation_queue's stage derivation is a second place that migration has to
+ * touch — its `count(*) filter (where r.agent_key = 'deterministic' ...)` and
+ * `... = 'fraud-pattern' ...` arms are hardcoded to these two keys, so a third producer
+ * would never gate 'awaiting-analysis' or 'fraud-review' and every case would jump straight
+ * to 'analysed' the moment the other two finished.
  */
 
 export const AGENT_KEYS = ["deterministic", "fraud-pattern"] as const;

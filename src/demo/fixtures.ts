@@ -55,12 +55,17 @@ export const fixturePipeline: AgentStage[] = [
 ];
 
 export const fixtureCases: CaseSummary[] = [
-  { id: "INV-0248", databaseId: "00000000-0000-4000-8000-000000000248", entity: "Northstar Ltd", owner: "Maya Chen", risk: "high", stageId: "evidence-review", status: "review", ageDays: 2, lastActivity: "12 min ago" },
-  { id: "INV-0245", databaseId: "00000000-0000-4000-8000-000000000245", entity: "Orchid Supply", owner: "Rafael Cole", risk: "medium", stageId: "financial-analysis", status: "open", ageDays: 4, lastActivity: "38 min ago" },
-  { id: "INV-0241", databaseId: "00000000-0000-4000-8000-000000000241", entity: "Delta Works", owner: "Jaya Singh", risk: "low", stageId: "reporting", status: "open", ageDays: 6, lastActivity: "1 hr ago" },
-  { id: "INV-0239", databaseId: "00000000-0000-4000-8000-000000000239", entity: "Blue Harbor Group", owner: "Maya Chen", risk: "high", stageId: "fraud-pattern", status: "review", ageDays: 7, lastActivity: "2 hrs ago" },
-  { id: "INV-0237", databaseId: "00000000-0000-4000-8000-000000000237", entity: "Pine & Ledger", owner: "Rafael Cole", risk: "medium", stageId: "evidence-review", status: "approved", ageDays: 9, lastActivity: "Yesterday" },
-  { id: "INV-0232", databaseId: "00000000-0000-4000-8000-000000000232", entity: "Aster Mobility", owner: "Jaya Singh", risk: "low", stageId: "reporting", status: "closed", ageDays: 14, lastActivity: "3 days ago" },
+  // "analysing", not "analysed": fixturePipeline — the pipeline every demo case shares —
+  // shows both agents still "running" (18/22, 14/22) and Reporting waiting at 4/19. Per the
+  // real view's own rules (pipeline.running > 0 => 'analysing'), that pipeline is a case
+  // still in progress, and this is the one demo case whose other steps get real content, so
+  // its stage badge has to agree with what its own summary panel renders underneath it.
+  { id: "INV-0248", databaseId: "00000000-0000-4000-8000-000000000248", entity: "Northstar Ltd", owner: "Maya Chen", risk: "high", stageId: "analysing", status: "review", ageDays: 2, lastActivity: "12 min ago" },
+  { id: "INV-0245", databaseId: "00000000-0000-4000-8000-000000000245", entity: "Orchid Supply", owner: "Rafael Cole", risk: "medium", stageId: "awaiting-analysis", status: "open", ageDays: 4, lastActivity: "38 min ago" },
+  { id: "INV-0241", databaseId: "00000000-0000-4000-8000-000000000241", entity: "Delta Works", owner: "Jaya Singh", risk: "low", stageId: "analysed", status: "open", ageDays: 6, lastActivity: "1 hr ago" },
+  { id: "INV-0239", databaseId: "00000000-0000-4000-8000-000000000239", entity: "Blue Harbor Group", owner: "Maya Chen", risk: "high", stageId: "fraud-review", status: "review", ageDays: 7, lastActivity: "2 hrs ago" },
+  { id: "INV-0237", databaseId: "00000000-0000-4000-8000-000000000237", entity: "Pine & Ledger", owner: "Rafael Cole", risk: "medium", stageId: "analysed", status: "approved", ageDays: 9, lastActivity: "Yesterday" },
+  { id: "INV-0232", databaseId: "00000000-0000-4000-8000-000000000232", entity: "Aster Mobility", owner: "Jaya Singh", risk: "low", stageId: "analysed", status: "closed", ageDays: 14, lastActivity: "3 days ago" },
 ];
 
 export const fixtureEvidence: EvidenceRecord[] = [
@@ -79,10 +84,10 @@ export const fixtureEvidence: EvidenceRecord[] = [
 ];
 
 export const fixtureFindings: Finding[] = [
-  { id: "F-18", caseId: "INV-0248", agent: "Fraud pattern investigator", summary: "Beneficiary mismatch warrants enhanced review before payment release.", confidence: 0.89, evidenceIds: ["E-118", "E-119"], contradictoryEvidenceIds: ["E-120"] },
-  { id: "F-19", caseId: "INV-0248", agent: "Financial analysis investigator", summary: "Payment timing is within policy, but beneficiary change is not documented.", confidence: 0.78, evidenceIds: ["E-119"], contradictoryEvidenceIds: ["E-120", "E-121"] },
-  { id: "F-12", caseId: "INV-0245", agent: "Financial analysis investigator", summary: "Variance is material but supported by an approved purchase order.", confidence: 0.84, evidenceIds: ["E-105", "E-106"], contradictoryEvidenceIds: [] },
-  { id: "F-09", caseId: "INV-0239", agent: "Fraud pattern investigator", summary: "Weekend merchant cluster needs source ownership evidence.", confidence: 0.74, evidenceIds: ["E-090"], contradictoryEvidenceIds: ["E-091"] },
+  { id: "F-18", caseId: "INV-0248", agent: "Fraud pattern investigator", summary: "Beneficiary mismatch warrants enhanced review before payment release.", confidence: 0.89, severity: null, evidenceIds: ["E-118", "E-119"], contradictoryEvidenceIds: ["E-120"] },
+  { id: "F-19", caseId: "INV-0248", agent: "Financial analysis investigator", summary: "Payment timing is within policy, but beneficiary change is not documented.", confidence: 0.78, severity: null, evidenceIds: ["E-119"], contradictoryEvidenceIds: ["E-120", "E-121"] },
+  { id: "F-12", caseId: "INV-0245", agent: "Financial analysis investigator", summary: "Variance is material but supported by an approved purchase order.", confidence: 0.84, severity: null, evidenceIds: ["E-105", "E-106"], contradictoryEvidenceIds: [] },
+  { id: "F-09", caseId: "INV-0239", agent: "Fraud pattern investigator", summary: "Weekend merchant cluster needs source ownership evidence.", confidence: 0.74, severity: null, evidenceIds: ["E-090"], contradictoryEvidenceIds: ["E-091"] },
 ];
 
 export const fixtureActivity: ActivityEvent[] = [

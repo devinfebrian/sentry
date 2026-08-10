@@ -124,3 +124,73 @@ describe("analyseRows", () => {
       .toEqual(new Set(["duplicate-amount", "outlier-amount", "missing-amount"]));
   });
 });
+
+describe("severity", () => {
+  const headers = ["entity", "amount"];
+  const row = (sourceRow: number, entity: string, amount: number | string) => ({
+    sourceRow,
+    entity,
+    values: { entity, amount },
+  });
+
+  it("rates a duplicate group of three or more as high, and a pair as medium", () => {
+    const pair = analyseRows(headers, [row(2, "Acme", 100), row(3, "Acme", 100)]);
+    expect(pair.find((f) => f.rule === "duplicate-amount")?.severity).toBe("medium");
+
+    const triple = analyseRows(headers, [row(2, "Acme", 100), row(3, "Acme", 100), row(4, "Acme", 100)]);
+    expect(triple.find((f) => f.rule === "duplicate-amount")?.severity).toBe("high");
+  });
+
+  it("rates an outlier at ten times the median as high and four times as medium", () => {
+    // Median of 10, 10, 10 is 10. 40 is exactly OUTLIER_MULTIPLE; 100 is exactly ten times.
+    const medium = analyseRows(headers, [row(2, "A", 10), row(3, "B", 10), row(4, "C", 10), row(5, "D", 40)]);
+    expect(medium.find((f) => f.rule === "outlier-amount")?.severity).toBe("medium");
+
+    const high = analyseRows(headers, [row(2, "A", 10), row(3, "B", 10), row(4, "C", 10), row(5, "D", 100)]);
+    expect(high.find((f) => f.rule === "outlier-amount")?.severity).toBe("high");
+  });
+
+  it("rates outlier severity on the rounded multiple its summary prints", () => {
+    // 96 over a median of 10 prints "10x the median". Severity must agree with the words.
+    const finding = analyseRows(headers, [row(2, "A", 10), row(3, "B", 10), row(4, "C", 10), row(5, "D", 96)])
+      .find((f) => f.rule === "outlier-amount");
+    expect(finding?.summary).toContain("10x the median");
+    expect(finding?.severity).toBe("high");
+  });
+
+  it("rounds the other way too: 9.4x prints 9x and stays medium", () => {
+    // 94 over a median of 10 is 9.4, which rounds down to 9 — the other side of the round
+    // point from the 96 -> 10x case above. Both sides of the boundary need coverage, since
+    // rounding is exactly what the backfill depends on being exact.
+    const finding = analyseRows(headers, [row(2, "A", 10), row(3, "B", 10), row(4, "C", 10), row(5, "D", 94)])
+      .find((f) => f.rule === "outlier-amount");
+    expect(finding?.summary).toContain("9x the median");
+    expect(finding?.severity).toBe("medium");
+  });
+
+  it("rates missing amounts by share of the import", () => {
+    // 1 of 10 rows is exactly the 10% threshold.
+    const atThreshold = analyseRows(headers, [
+      row(2, "A", ""),
+      ...Array.from({ length: 9 }, (_, index) => row(index + 3, `E${index}`, 50)),
+    ]);
+    expect(atThreshold.find((f) => f.rule === "missing-amount")?.severity).toBe("medium");
+
+    // 1 of 20 rows is below it.
+    const belowThreshold = analyseRows(headers, [
+      row(2, "A", ""),
+      ...Array.from({ length: 19 }, (_, index) => row(index + 3, `E${index}`, 50)),
+    ]);
+    expect(belowThreshold.find((f) => f.rule === "missing-amount")?.severity).toBe("low");
+  });
+
+  it("gives every deterministic finding a severity", () => {
+    const findings = analyseRows(headers, [
+      row(2, "Acme", 100), row(3, "Acme", 100), row(4, "Beta", 5), row(5, "Gamma", ""),
+    ]);
+    expect(findings.length).toBeGreaterThan(0);
+    for (const finding of findings) {
+      expect(["low", "medium", "high"]).toContain(finding.severity);
+    }
+  });
+});

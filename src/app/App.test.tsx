@@ -88,7 +88,7 @@ describe("App", () => {
       entity: "Northstar Ltd",
       owner: "Maya Chen",
       risk: "high",
-      stageId: "evidence-review",
+      stageId: "fraud-review",
       status: "review",
       ageDays: 2,
       lastActivity: "12 min ago",
@@ -99,18 +99,17 @@ describe("App", () => {
       entity: "Imported Company",
       owner: "test-user",
       risk: "not-assessed",
-      stageId: "not-started",
+      stageId: "awaiting-import",
       status: "open",
       ageDays: 0,
       lastActivity: "2026-08-06T10:00:00.000Z",
-      analysisStatus: "not-started",
     } : {
       id: "INV-0248",
       databaseId: "00000000-0000-4000-8000-000000000248",
       entity: "Northstar Ltd",
       owner: "Maya Chen",
       risk: "high",
-      stageId: "evidence-review",
+      stageId: "fraud-review",
       status: "review",
       ageDays: 2,
       lastActivity: "12 min ago",
@@ -152,11 +151,10 @@ describe("App", () => {
       entity: "Imported Company",
       owner: "test-user",
       risk: "not-assessed" as const,
-      stageId: "not-started",
+      stageId: "awaiting-import" as const,
       status: "open" as const,
       ageDays: 0,
       lastActivity: "2026-08-06T10:00:00.000Z",
-      analysisStatus: "not-started" as const,
     };
     const upload = { id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" };
     investigationCreateMock.mockResolvedValue(investigation);
@@ -232,11 +230,10 @@ describe("App", () => {
       entity: "Imported Company",
       owner: "test-user",
       risk: "not-assessed" as const,
-      stageId: "not-started",
+      stageId: "awaiting-import" as const,
       status: "open" as const,
       ageDays: 0,
       lastActivity: "2026-08-06T10:00:00.000Z",
-      analysisStatus: "not-started" as const,
     };
     const upload = { id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" };
     investigationCreateMock.mockResolvedValue(investigation);
@@ -274,11 +271,10 @@ describe("App", () => {
       entity: "Imported Company",
       owner: "test-user",
       risk: "not-assessed" as const,
-      stageId: "not-started",
+      stageId: "awaiting-import" as const,
       status: "open" as const,
       ageDays: 0,
       lastActivity: "2026-08-06T10:00:00.000Z",
-      analysisStatus: "not-started" as const,
     };
     const upload = { id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" };
     const retryUpload = vi.fn().mockResolvedValue(upload);

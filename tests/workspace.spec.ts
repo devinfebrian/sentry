@@ -243,6 +243,45 @@ test.describe("analyst workspace", () => {
     expect(byAgent[1]).toMatchObject({ agent_key: "fraud-pattern", status: "waiting" });
   });
 
+  test("the queue reports a stage and filters on it", async ({ page }) => {
+    await page.goto("/cases");
+
+    // Assert something positive first: toHaveCount(0) is satisfied instantly by a page that
+    // has not rendered, which is how an earlier walkthrough reported zero findings against a
+    // database holding three.
+    await expect(page.getByRole("columnheader", { name: /stage/i })).toBeVisible();
+    // Data rows carry the case link as a row header (`th[scope="row"]`); the queue's own
+    // column header row does not, so this isolates cases from the header without depending
+    // on row order.
+    const dataRows = page.getByRole("row").filter({ has: page.locator("th[scope='row']") });
+    await expect(dataRows.first()).toBeVisible();
+
+    // Read the stage off a case that is actually in the workspace rather than assuming a
+    // fraud-review case and an awaiting-import case both already exist — the backlog this
+    // test runs against is shared with every other test and with whatever a human ran the
+    // fraud-pattern agent across, so neither is guaranteed. What the filter promises is
+    // narrower and does not need either: select a stage, and every rendered row shows it.
+    const stageLabel = (await dataRows.first().locator("td").nth(1).innerText()).trim();
+    expect(stageLabel, "the queue's first row must show a stage label").toBeTruthy();
+
+    const stageFilter = page.getByRole("combobox", { name: /stage/i });
+    const stageValue = await stageFilter
+      .locator("option")
+      .filter({ hasText: new RegExp(`^${stageLabel}$`) })
+      .first()
+      .getAttribute("value");
+    expect(stageValue, `"${stageLabel}" must be one of the filter's own options`).toBeTruthy();
+
+    await stageFilter.selectOption(stageValue!);
+
+    await expect(dataRows.first()).toBeVisible();
+    const filteredCount = await dataRows.count();
+    expect(filteredCount).toBeGreaterThan(0);
+    for (let index = 0; index < filteredCount; index += 1) {
+      await expect(dataRows.nth(index).locator("td").nth(1)).toHaveText(stageLabel);
+    }
+  });
+
   test("rejects an unsupported file extension with a readable error", async ({ page }) => {
     const dialog = await openImportDialog(page);
 

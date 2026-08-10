@@ -14,10 +14,31 @@ import { type ParsedImportRow, type ParserValue, valueHeaderPattern } from "./pa
 
 export type AnalysisRule = "duplicate-amount" | "outlier-amount" | "missing-amount";
 
+/**
+ * How much a finding matters, as distinct from how sure its producer is that it is real.
+ * The rules are always certain — confidence 1 — so severity is the only thing that varies
+ * between one duplicate pair and a group of nine.
+ */
+export type Severity = "low" | "medium" | "high";
+
 export const ANALYSIS_AGENT = "Financial analysis";
 
 /** A value must exceed the median by this factor before it is worth pointing at. */
 export const OUTLIER_MULTIPLE = 4;
+
+/** A duplicate group at least this large stops being a plausible double-entry. */
+export const DUPLICATE_HIGH_ROWS = 3;
+
+/**
+ * A value at least this many times the median, measured on the *rounded* multiple the
+ * summary prints. Comparing the raw ratio would let a finding read "10x the median" while
+ * being rated medium, and would put this rule out of step with the backfill that reads
+ * that printed number.
+ */
+export const OUTLIER_HIGH_MULTIPLE = 10;
+
+/** Missing amounts at or above this share of the import are no longer an isolated slip. */
+export const MISSING_MEDIUM_SHARE = 0.1;
 
 export interface AnalysisEvidence {
   sourceRow: number;
@@ -31,6 +52,12 @@ export interface AnalysisFinding {
   agent: string;
   summary: string;
   confidence: number;
+  /**
+   * Null only from a producer that did not state one — the AI agent when its response
+   * omitted or mangled the field. The rules always set it, and the property is required so
+   * a rule that forgets fails to compile.
+   */
+  severity: Severity | null;
   evidence: AnalysisEvidence[];
 }
 
@@ -75,6 +102,7 @@ function duplicateAmounts(rows: ParsedImportRow[], header: string): AnalysisFind
         agent: ANALYSIS_AGENT,
         summary: `${group.length} rows record ${amountLabel(value)} for ${group[0].entity}`,
         confidence: 1,
+        severity: group.length >= DUPLICATE_HIGH_ROWS ? "high" : "medium",
         evidence: group.map((row) => ({
           sourceRow: row.sourceRow,
           sourceLabel: rowLabel(row),
@@ -100,27 +128,32 @@ function outlierAmounts(rows: ParsedImportRow[], header: string): AnalysisFindin
 
   return valued
     .filter((entry) => entry.value >= middle * OUTLIER_MULTIPLE)
-    .map((entry) => ({
-      rule: "outlier-amount" as const,
-      agent: ANALYSIS_AGENT,
-      summary: `${entry.row.entity} records ${amountLabel(entry.value)}, ${Math.round(entry.value / middle)}x the median of ${amountLabel(middle)}`,
-      confidence: 1,
-      evidence: [
-        {
-          sourceRow: entry.row.sourceRow,
-          sourceLabel: rowLabel(entry.row),
-          claim: `${header} = ${amountLabel(entry.value)}`,
-          relevance: "supporting" as const,
-        },
-        // The typical row is what makes the outlier readable as an outlier.
-        {
-          sourceRow: typical.row.sourceRow,
-          sourceLabel: rowLabel(typical.row),
-          claim: `Median ${header} across this import is ${amountLabel(middle)}`,
-          relevance: "context" as const,
-        },
-      ],
-    }));
+    .map((entry) => {
+      // One number, used for the words and for the rating, so they cannot disagree.
+      const multiple = Math.round(entry.value / middle);
+      return {
+        rule: "outlier-amount" as const,
+        agent: ANALYSIS_AGENT,
+        summary: `${entry.row.entity} records ${amountLabel(entry.value)}, ${multiple}x the median of ${amountLabel(middle)}`,
+        confidence: 1,
+        severity: multiple >= OUTLIER_HIGH_MULTIPLE ? "high" as const : "medium" as const,
+        evidence: [
+          {
+            sourceRow: entry.row.sourceRow,
+            sourceLabel: rowLabel(entry.row),
+            claim: `${header} = ${amountLabel(entry.value)}`,
+            relevance: "supporting" as const,
+          },
+          // The typical row is what makes the outlier readable as an outlier.
+          {
+            sourceRow: typical.row.sourceRow,
+            sourceLabel: rowLabel(typical.row),
+            claim: `Median ${header} across this import is ${amountLabel(middle)}`,
+            relevance: "context" as const,
+          },
+        ],
+      };
+    });
 }
 
 function missingAmounts(rows: ParsedImportRow[], header: string): AnalysisFinding[] {
@@ -137,6 +170,7 @@ function missingAmounts(rows: ParsedImportRow[], header: string): AnalysisFindin
     agent: ANALYSIS_AGENT,
     summary: `${affected.length} ${affected.length === 1 ? "row has" : "rows have"} no ${header} recorded`,
     confidence: 1,
+    severity: affected.length / rows.length >= MISSING_MEDIUM_SHARE ? "medium" : "low",
     evidence: affected.map((row) => ({
       sourceRow: row.sourceRow,
       sourceLabel: rowLabel(row),

@@ -188,3 +188,45 @@ describe("analyseFraudPatterns", () => {
     expect(propose.mock.calls[0][0].system).toContain("Do not repeat those");
   });
 });
+
+describe("severity from the model", () => {
+  const rows = [
+    { sourceRow: 2, entity: "Acme", values: { entity: "Acme", amount: 9400 } },
+    { sourceRow: 3, entity: "Acme", values: { entity: "Acme", amount: 9500 } },
+  ];
+
+  const response = (severity: unknown) => ({
+    findings: [{
+      rule: "round-number-clustering",
+      summary: "Two payments sit just under the 10,000 approval threshold.",
+      confidence: 0.9,
+      severity,
+      evidence: [{ sourceRow: 2, claim: "amount = 9400", relevance: "supporting" }],
+    }],
+  });
+
+  it("keeps a severity the model stated", () => {
+    expect(validateFindings(response("high"), rows)[0].severity).toBe("high");
+  });
+
+  it("keeps the finding and records no severity when the model omits it", () => {
+    const findings = validateFindings(response(undefined), rows);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBeNull();
+  });
+
+  it("keeps the finding and records no severity for a value outside the enum", () => {
+    for (const bad of ["critical", "HIGH", 3, null, {}]) {
+      const findings = validateFindings(response(bad), rows);
+      expect(findings).toHaveLength(1);
+      expect(findings[0].severity).toBeNull();
+    }
+  });
+
+  it("still drops a finding missing a rule, summary, or confidence", () => {
+    // Severity is best-effort; these three are not. The asymmetry is the point.
+    expect(validateFindings({ findings: [{ ...response("high").findings[0], rule: null }] }, rows)).toHaveLength(0);
+    expect(validateFindings({ findings: [{ ...response("high").findings[0], summary: "  " }] }, rows)).toHaveLength(0);
+    expect(validateFindings({ findings: [{ ...response("high").findings[0], confidence: 0 }] }, rows)).toHaveLength(0);
+  });
+});

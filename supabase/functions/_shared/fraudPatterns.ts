@@ -1,5 +1,5 @@
 import type { ParsedImportRow } from "./parser.ts";
-import type { AnalysisFinding } from "./analysis.ts";
+import type { AnalysisFinding, Severity } from "./analysis.ts";
 import { AGENT_DESCRIPTORS } from "./agentKeys.ts";
 
 /**
@@ -72,6 +72,7 @@ interface ModelFinding {
   rule: string;
   summary: string;
   confidence: number;
+  severity: string;
   evidence: ModelEvidence[];
 }
 
@@ -88,9 +89,11 @@ const systemPrompt = [
   "the analyst draws. Cite the source row number of every row you rely on, exactly as given.",
   "",
   "Set confidence honestly: near 1 when the pattern is unmistakable in the rows, lower when it is",
-  "suggestive. Report an empty findings array when the rows show nothing worth an analyst's",
-  "attention — a clean import is a normal and useful result, and is better than padding the list",
-  "with weak observations.",
+  "suggestive. Severity is a separate judgement and must not track confidence: confidence is whether",
+  "the pattern is really there, severity is how much it would matter if it is. A pattern can be",
+  "unmistakable and minor. Report an empty findings array when the rows show nothing worth an",
+  "analyst's attention — a clean import is a normal and useful result, and is better than padding",
+  "the list with weak observations.",
 ].join("\n");
 
 function serialiseRows(headers: string[], rows: ParsedImportRow[]) {
@@ -119,6 +122,15 @@ function clampConfidence(value: unknown): number | null {
   // than render a finding the producer disowns.
   if (value <= 0) return null;
   return Math.min(value, 1);
+}
+
+/**
+ * Best-effort, unlike the fields above it. A finding whose severity is missing or outside
+ * the enum is still a finding the analyst should see; it simply arrives unrated. Dropping a
+ * real, well-evidenced finding over a bad enum value would lose more than it protects.
+ */
+function severityValue(value: unknown): Severity | null {
+  return value === "low" || value === "medium" || value === "high" ? value : null;
 }
 
 function ruleSlug(value: unknown): string | null {
@@ -185,6 +197,7 @@ export function validateFindings(raw: unknown, rows: ParsedImportRow[]): Analysi
       agent: AGENT_DESCRIPTORS["fraud-pattern"].name,
       summary,
       confidence,
+      severity: severityValue(finding.severity),
       evidence,
     });
   }
