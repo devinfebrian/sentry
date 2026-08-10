@@ -16,13 +16,22 @@ This plan is a historical record of what was proposed, not of what shipped — l
 below so nobody loses the reasoning that produced it. Two things changed during execution;
 copy neither the SQL nor the error code below as current without checking the migration.
 
-- **Not-found is `PT404`, not `P0002`.** Every place below that raises or maps `P0002` for
-  guard 2 (the migration SQL at line 379, the client-side test at line 1138, and
-  `mapRpcError` at line 1219) shipped as `PT404` instead. `P0002`, the standard plpgsql
-  `no_data_found` SQLSTATE, has no entry in PostgREST's default SQLSTATE-to-HTTP-status table and surfaces as
-  a bare 500 for an RPC called straight from the browser, where the status code is part of
-  the contract; `PT404` is PostgREST's own explicit-status convention instead. Caught in
-  Task 2's review.
+- **Not-found is `PT404`, not `P0002`.** Five places in this plan say `P0002` for guard 2's
+  not-found error, and all five shipped as `PT404` instead. Cited by section and the exact
+  stale text rather than by line number, since line numbers drift the moment anything above
+  them is edited and a wrong citation is worse than none:
+  - Task 1, Interfaces: "Raises `P0001` with a human-readable message for every refusal and
+    `P0002` when the investigation is not found."
+  - Task 1, Step 3 ("Write the migration"): `` raise exception using errcode = 'P0002', message = 'Investigation not found.'; ``
+  - Task 4, Step 1 ("Write the failing service test"): `` { code: "P0002", message: "Investigation not found." } ``
+  - Task 4, Step 4 ("Write the service"), the doc comment above `mapRpcError`: "P0002 is the
+    exception: \"Investigation not found\" is a true statement about a query, not advice."
+  - Task 4, Step 4, inside `mapRpcError`: `` if (error?.code === "P0002") return new Error(CASE_NOT_FOUND_ERROR); ``
+
+  `P0002`, the standard plpgsql `no_data_found` SQLSTATE, has no entry in PostgREST's default
+  SQLSTATE-to-HTTP-status table and surfaces as a bare 500 for an RPC called straight from the
+  browser, where the status code is part of the contract; `PT404` is PostgREST's own
+  explicit-status convention instead. Caught in Task 2's review.
 - **Guard 9 fails closed instead of trusting a recommender exists, and `update (status)` is
   revoked from `authenticated`.** This plan (and the spec it followed) asserted that "`review`
   is only reachable through a recommendation," which was false: the foundation migration's two

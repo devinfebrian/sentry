@@ -67,6 +67,20 @@ index on `(investigation_id, event_type, created_at)` on `sentinel_activity_even
 table is append-only and only grows, and it now has two readers of this shape (guard 9 and the
 activity feed's decision filter).
 
+**`DecisionPanel.test.tsx`'s "lets a manager reopen a decided case, and nothing else" doesn't
+check Reject.** It asserts Approve is absent once a case is `approved`, but never asserts Reject
+is absent too — so "and nothing else" in the test's own name is only half proven. The same shape
+as the three refusal tests above: a passing test whose title promises full coverage while
+checking only one of two alternatives. Cheap to close — one more `queryByRole` assertion — not
+done here because it wasn't required for Task 5's exit criteria.
+
+**A failed submit's `role="alert"` and the activity feed's `ErrorState` can both be on screen at
+once.** If the decision submit fails while the feed is independently in its own error state, two
+`alert` regions render simultaneously, with no coordination between them and no defined order
+for which a screen reader announces first. Not incorrect — both messages are true — just noisy.
+Worth folding into one region, or ordering the announcement, if it's ever reported as confusing
+in practice; not observed to be, yet.
+
 **The two fraud-pattern findings are still unrated.** `select count(*) from sentinel_findings
 where severity is null` returns `2` against the live database — unchanged from the number the
 2026-08-10 risk-and-stage note recorded. This slice never touches `sentinel_findings` or
@@ -93,6 +107,23 @@ keeps every prior decision whether or not a later one supersedes it, so "approve
 for more evidence" is still fully readable in the history. The two-role split still applies on
 the way back in — only a manager can call `request-evidence`, an analyst cannot self-service a
 reopen.
+
+**During the activity feed's `loading` state, Approve and Reject render before the recommender
+is known.** This is the same misleading-button shape Task 5 spent a fix round closing for the
+feed's *error* state — while the feed hasn't resolved, `lastRecommender` is null, so a manager
+who wrote the recommendation could, for that window, see Approve/Reject with no explanation of
+why they can't act on their own recommendation, which is exactly the outcome the error-state fix
+exists to prevent. Seen during that same review and deliberately left open rather than folded
+into the same fix, because the two states aren't the same risk: `error` is a stable end state
+that can sit in front of a manager indefinitely with nothing to self-correct it, where `loading`
+is transient and clears itself the moment the feed resolves — in practice a fraction of a second
+against the live database, not a state a person reads and acts on. Guard 9 still refuses the
+write server-side regardless of what the panel renders, so the worst case during this window is
+an extra round trip and a refusal message, not a bypass of separation of duties. What would
+change the decision: evidence that the window is wide enough in practice to be seen and acted on
+— a slow connection, a large feed — at which point the fix is the one already built for the
+error path, withholding Approve/Reject until the recommender is known rather than only until the
+load fails.
 
 **`invite-member` is still serving its `_6` build.** Checked against the live project
 (`lehwqjzzuppjnddwxxow`) via `list_edge_functions`: `entrypoint_path` still reads
