@@ -10,13 +10,15 @@ const stepDescriptions: Record<string, string> = {
 const riskLabels: Record<RiskLevel, string> = { low: "Low risk", medium: "Medium risk", high: "High risk", "not-assessed": "Not assessed" };
 
 /**
- * Shown on decision and report once analysis has begun for the case.
+ * Shown on report once analysis has begun for the case. Decision used to share this state
+ * too, until DecisionPanel gave it a real implementation — this narrowed rather than
+ * deleted, because the distinction below is still live for report.
  *
  * Distinct from AnalysisNotStartedState on purpose: "not started" is a claim about the
  * case, and stage already says otherwise once it has moved past awaiting-import. "Not
- * built" is a claim about the software — these two steps have no producer at all, on any
- * case, at any stage. Conflating the two is how "Analysis not started / Stage: Analysed"
- * ended up in one status region.
+ * built" is a claim about the software — report has no producer at all, on any case, at
+ * any stage. Conflating the two is how "Analysis not started / Stage: Analysed" ended up
+ * in one status region.
  */
 export function StepNotBuiltState({ step, stage, risk }: { step: string; stage: CaseStage; risk: RiskLevel }) {
   return (
