@@ -370,7 +370,7 @@ git commit -m "Ask the investigator how much a pattern matters, not just whether
 One migration, one `apply_migration` call, because these four changes are one logical change and split calls produce ledger rows that can never reconcile against a single file.
 
 **Files:**
-- Create: `supabase/migrations/20260810120000_sentinel_case_risk_and_stage.sql`
+- Create: `supabase/migrations/20260810060036_sentinel_case_risk_and_stage.sql`
 - Create: `supabase/verify_sentinel_case_risk_and_stage.sql`
 
 **Interfaces:**
@@ -379,7 +379,7 @@ One migration, one `apply_migration` call, because these four changes are one lo
 
 - [ ] **Step 1: Write the migration**
 
-Create `supabase/migrations/20260810120000_sentinel_case_risk_and_stage.sql`:
+Create `supabase/migrations/20260810060036_sentinel_case_risk_and_stage.sql`:
 
 ```sql
 -- A case can now report a risk it earned and a stage it reached.
@@ -536,7 +536,7 @@ grant select on table public.sentinel_investigation_queue to authenticated;
 Create `supabase/verify_sentinel_case_risk_and_stage.sql`:
 
 ```sql
--- Verifies 20260810120000_sentinel_case_risk_and_stage.sql against a live database.
+-- Verifies 20260810060036_sentinel_case_risk_and_stage.sql against a live database.
 --
 -- Signatures are matched with oidvectortypes(proargtypes), never
 -- pg_get_function_identity_arguments, which returns parameter names on this server and so
