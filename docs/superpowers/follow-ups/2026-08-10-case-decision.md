@@ -108,22 +108,17 @@ for more evidence" is still fully readable in the history. The two-role split st
 the way back in — only a manager can call `request-evidence`, an analyst cannot self-service a
 reopen.
 
-**During the activity feed's `loading` state, Approve and Reject render before the recommender
-is known.** This is the same misleading-button shape Task 5 spent a fix round closing for the
-feed's *error* state — while the feed hasn't resolved, `lastRecommender` is null, so a manager
-who wrote the recommendation could, for that window, see Approve/Reject with no explanation of
-why they can't act on their own recommendation, which is exactly the outcome the error-state fix
-exists to prevent. Seen during that same review and deliberately left open rather than folded
-into the same fix, because the two states aren't the same risk: `error` is a stable end state
-that can sit in front of a manager indefinitely with nothing to self-correct it, where `loading`
-is transient and clears itself the moment the feed resolves — in practice a fraction of a second
-against the live database, not a state a person reads and acts on. Guard 9 still refuses the
-write server-side regardless of what the panel renders, so the worst case during this window is
-an extra round trip and a refusal message, not a bypass of separation of duties. What would
-change the decision: evidence that the window is wide enough in practice to be seen and acted on
-— a slow connection, a large feed — at which point the fix is the one already built for the
-error path, withholding Approve/Reject until the recommender is known rather than only until the
-load fails.
+**Closed in the final fix wave: the `loading`-state window where Approve/Reject rendered before
+the recommender was known.** This note originally left it open — while the feed hadn't
+resolved, `lastRecommender` was null, so a manager who wrote the recommendation could, for that
+window, see Approve/Reject with no explanation of why they couldn't act on their own
+recommendation. `feedUnavailable` was defined as `state.status === "error"`, which only covered
+the feed's *error* state and left `loading` exposed. Redefining it as `state.status !== "ready"`
+covers both in one comparison — Approve/Reject are withheld for the whole time the panel cannot
+yet confirm who recommended, not just once loading has failed. Guard 9 always refused the write
+server-side regardless of what the panel rendered, so this was never a bypass of separation of
+duties, only a misleading button for a fraction of a second — but there was no longer a reason to
+leave it open once the fix was one comparison away.
 
 **`invite-member` is still serving its `_6` build.** Checked against the live project
 (`lehwqjzzuppjnddwxxow`) via `list_edge_functions`: `entrypoint_path` still reads
@@ -189,12 +184,22 @@ or erase the audit trail. A REST `DELETE` against it from test teardown therefor
 because the original teardown never checked the response, it did so silently: `case-*` events
 from every run of the decisions suite piled up in the live workspace, unnoticed, the same class
 of bug as an unchecked-response leak elsewhere in this project's test suites.
-`sentinel_purge_case_decision_events` is the fix, and it is deliberately narrow — a `security
-definer` function, grantable to `service_role` only, that deletes only `case-%`-prefixed events
-for one named investigation, leaving the append-only guarantee against `authenticated` exactly
-as tight as before. Both `tests/decisions.spec.ts` and `tests/workspace.spec.ts` now assert its
-call succeeds (`expect(purged.status).toBeLessThan(300)`) instead of firing a DELETE and moving
-on.
+`sentinel_purge_case_decision_events` was the first fix, and it was narrower than it needed to
+be: it deleted only `case-%`-prefixed events, on the theory that those were the only ones this
+migration's own fixtures produced. That theory was wrong — seeding a fixture also fires the
+foundation triggers in `20260809000000_sentinel_identity_and_activity.sql`, which each insert
+their own event (`investigation-created`, `upload-created`) that does not match `case-%`.
+Deleting the investigation afterward orphaned both (`investigation_id` is `on delete set
+null`), and they rendered on `/activity` forever — roughly 24 permanent rows per full e2e run,
+one event family purged out of three. The final fix wave widened the predicate to every event
+belonging to the one named investigation and renamed the function to
+`sentinel_purge_investigation_events` to match — keeping the old name over a widened predicate
+would have been a lie in the schema. It is still a `security definer` function grantable to
+`service_role` only, and still scoped to one named investigation, so the append-only guarantee
+against `authenticated` is exactly as tight as before. Both `tests/decisions.spec.ts` and
+`tests/workspace.spec.ts` now assert its call succeeds (`expect(purged.status).toBeLessThan(300)`)
+instead of firing a DELETE and moving on — and, in that same fix wave, the two teardown DELETEs
+that follow it are checked the same way, closing the last unchecked response in this path.
 
 **A brief's named test locator can be wrong even when the brief is right about what to test.**
 Task 6's brief asked for a test asserting on the text "Decision record" — but that string is the
@@ -223,4 +228,6 @@ file for its own reasons.
 the risk-and-stage slice closed for stage and the multi-agent-analysis slice closed for the
 pipeline: a column that looks like derived state but never actually derives. Status now
 advances through `open → review → approved | closed` under the nine guards recorded above, and
-back to `open` on `request-evidence`. The `CaseHeader` badge now reports something earned.
+back to `open` on `request-evidence`. The status `StatusBadge` on the case workspace page now
+reports something earned. (`CaseHeader`'s own badge was never the one at issue here — it
+renders risk, not status; this note originally misnamed it, corrected in the final fix wave.)

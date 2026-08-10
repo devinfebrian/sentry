@@ -304,10 +304,11 @@ Create `supabase/migrations/20260810120000_sentinel_case_decisions.sql`:
 -- A case can now carry a decision somebody actually made.
 --
 -- status has held 'open' on every investigation ever created: create() writes it once and
--- nothing has moved it since, so the CaseHeader badge reports a constant as though it were
--- state. The two-role chain below is not new either — the foundation migration wrote an
--- analyst update policy bounded on both sides by status in ('open','review') and a manager
--- policy without that bound, then never exercised either.
+-- nothing has moved it since, so the status StatusBadge in CaseWorkspacePage.tsx reports a
+-- constant as though it were state. (CaseHeader's own badge is unrelated and unaffected — it
+-- renders risk, not status.) The two-role chain below is not new either — the foundation
+-- migration wrote an analyst update policy bounded on both sides by status in
+-- ('open','review') and a manager policy without that bound, then never exercised either.
 
 -- --------------------------------------------------------------------------------------
 -- 1. Decisions join the audit vocabulary

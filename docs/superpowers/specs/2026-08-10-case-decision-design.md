@@ -12,8 +12,9 @@ cannot be quietly rewritten.
 `sentinel_investigations.status` has carried a four-value union since the foundation
 migration — `open | review | approved | closed` — and every investigation ever created holds
 `open`. `create()` in `src/services/sentinelInvestigations.ts` writes it once at line 171 and
-nothing in the application has ever moved it since. The `StatusBadge` in `CaseHeader`
-therefore reads "open" on every case in the workspace, forever.
+nothing in the application has ever moved it since. The status `StatusBadge` on the case
+workspace page (`CaseWorkspacePage.tsx`) therefore reads "open" on every case in the workspace,
+forever. (`CaseHeader`'s own badge is unrelated — it renders risk, not status.)
 
 This is the same defect the last two slices removed, one layer over: a column that looks like
 state but is a constant, and a badge that reports it as though it were earned. Risk and stage
