@@ -21,6 +21,16 @@ type InvestigationRow = {
 };
 
 type InvestigationInsert = Database["public"]["Tables"]["sentinel_investigations"]["Insert"];
+
+/**
+ * The table row an insert into sentinel_investigations actually returns — distinct from
+ * InvestigationRow, the *view* shape. The table has created_by and no derived risk/stage;
+ * the view has the reverse. create() only gets away with reading this as InvestigationRow
+ * today because it spreads risk and stage in by hand afterwards — a future
+ * `return mapRow(data)` would compile against the wrong type and silently ship
+ * `undefined` risk and stage.
+ */
+type InvestigationTableRow = Database["public"]["Tables"]["sentinel_investigations"]["Row"];
 type InvestigationContext = {
   workspaceId: string;
   userId: string;
@@ -40,7 +50,7 @@ type InvestigationReadQuery = {
 
 type InvestigationInsertQuery = {
   select(columns: "*"): InvestigationInsertQuery;
-  single(): PromiseLike<PostgrestSingleResponse<InvestigationRow>>;
+  single(): PromiseLike<PostgrestSingleResponse<InvestigationTableRow>>;
 };
 
 export type SentinelInvestigationClient = {

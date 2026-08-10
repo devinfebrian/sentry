@@ -158,6 +158,16 @@ describe("severity", () => {
     expect(finding?.severity).toBe("high");
   });
 
+  it("rounds the other way too: 9.4x prints 9x and stays medium", () => {
+    // 94 over a median of 10 is 9.4, which rounds down to 9 — the other side of the round
+    // point from the 96 -> 10x case above. Both sides of the boundary need coverage, since
+    // rounding is exactly what the backfill depends on being exact.
+    const finding = analyseRows(headers, [row(2, "A", 10), row(3, "B", 10), row(4, "C", 10), row(5, "D", 94)])
+      .find((f) => f.rule === "outlier-amount");
+    expect(finding?.summary).toContain("9x the median");
+    expect(finding?.severity).toBe("medium");
+  });
+
   it("rates missing amounts by share of the import", () => {
     // 1 of 10 rows is exactly the 10% threshold.
     const atThreshold = analyseRows(headers, [

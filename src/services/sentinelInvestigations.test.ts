@@ -39,6 +39,23 @@ const row: InvestigationRow = {
   stage: "fraud-review",
 };
 
+// What an insert into sentinel_investigations actually returns: the table row, which has
+// created_by and neither risk nor stage — the opposite of what the view row above carries.
+// create() maps this, so its fakes must be typed as this shape rather than InvestigationRow.
+type InvestigationTableRow = Database["public"]["Tables"]["sentinel_investigations"]["Row"];
+
+const tableRow: InvestigationTableRow = {
+  id: row.id,
+  workspace_id: row.workspace_id,
+  reference: row.reference,
+  entity: row.entity,
+  owner_id: row.owner_id,
+  status: row.status,
+  created_by: context.userId,
+  created_at: row.created_at,
+  updated_at: row.updated_at,
+};
+
 function successResponse<T>(data: T): PostgrestSingleResponse<T> {
   return { data, error: null, status: 200, statusText: "OK", success: true, count: null };
 }
@@ -67,7 +84,7 @@ function fakeReadQuery(
   return { query: adapter, eq, order, maybeSingle };
 }
 
-function fakeInsertQuery(response: PostgrestSingleResponse<InvestigationRow>) {
+function fakeInsertQuery(response: PostgrestSingleResponse<InvestigationTableRow>) {
   let query!: InvestigationInsertQuery;
   const select = vi.fn((_columns: "*"): InvestigationInsertQuery => query);
   const single = vi.fn(() => Promise.resolve(response));
@@ -180,7 +197,7 @@ describe("createSentinelInvestigationService", () => {
   });
 
   it("creates a case as unassessed and awaiting import", async () => {
-    const { query } = fakeInsertQuery(successResponse(row));
+    const { query } = fakeInsertQuery(successResponse(tableRow));
     const { client } = fakeInsertClient(query);
     const created = await createSentinelInvestigationService(client, context).create({ entity: "New Co", ownerId: "" });
 
@@ -189,7 +206,7 @@ describe("createSentinelInvestigationService", () => {
   });
 
   it("creates a scoped investigation with a generated reference and creator context", async () => {
-    const { query } = fakeInsertQuery(successResponse(row));
+    const { query } = fakeInsertQuery(successResponse(tableRow));
     const { client, from, insert } = fakeInsertClient(query);
     const service = createSentinelInvestigationService(client, context);
 
@@ -210,8 +227,8 @@ describe("createSentinelInvestigationService", () => {
   });
 
   it("retries a unique reference collision and returns the inserted investigation", async () => {
-    const { query: collisionQuery } = fakeInsertQuery(errorResponse<InvestigationRow>("23505", "duplicate key value violates unique constraint"));
-    const { query: successQuery } = fakeInsertQuery(successResponse(row));
+    const { query: collisionQuery } = fakeInsertQuery(errorResponse<InvestigationTableRow>("23505", "duplicate key value violates unique constraint"));
+    const { query: successQuery } = fakeInsertQuery(successResponse(tableRow));
     const { client, from, inserts } = fakeInsertClientSequence([collisionQuery, successQuery]);
     const service = createSentinelInvestigationService(client, context);
 
@@ -225,7 +242,7 @@ describe("createSentinelInvestigationService", () => {
   });
 
   it("surfaces an exhausted unique reference collision after bounded retries", async () => {
-    const collision = () => fakeInsertQuery(errorResponse<InvestigationRow>("23505", "duplicate key value violates unique constraint")).query;
+    const collision = () => fakeInsertQuery(errorResponse<InvestigationTableRow>("23505", "duplicate key value violates unique constraint")).query;
     const { client, from } = fakeInsertClientSequence([collision(), collision(), collision()]);
     const service = createSentinelInvestigationService(client, context);
 
@@ -236,7 +253,7 @@ describe("createSentinelInvestigationService", () => {
   });
 
   it("does not retry non-unique create errors", async () => {
-    const { query } = fakeInsertQuery(errorResponse<InvestigationRow>("42501", "permission denied"));
+    const { query } = fakeInsertQuery(errorResponse<InvestigationTableRow>("42501", "permission denied"));
     const { client, from } = fakeInsertClient(query);
     const service = createSentinelInvestigationService(client, context);
 
