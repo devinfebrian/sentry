@@ -111,6 +111,30 @@ describe("DecisionPanel", () => {
     expect(screen.queryByRole("button", { name: /^approve$/i })).not.toBeInTheDocument();
   });
 
+  it("withholds approve and reject from a manager when the recommendation history fails to load, and says why", async () => {
+    const activityService = { list: vi.fn().mockRejectedValue(new Error("network down")) };
+    renderPanel({
+      caseItem: caseItem("review"),
+      role: "manager",
+      viewerId: "manager-1",
+      activityService,
+    });
+
+    // The explanation must appear first: an absence assertion on its own passes instantly
+    // against a component that rendered nothing, which is how this bug shipped originally.
+    expect(await screen.findByText(/cannot confirm who recommended/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^approve$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^reject$/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /request more evidence/i })).toBeInTheDocument();
+  });
+
+  it("shows the history section's own error state when the feed fails to load", async () => {
+    const activityService = { list: vi.fn().mockRejectedValue(new Error("network down")) };
+    renderPanel({ caseItem: caseItem("review"), activityService });
+
+    expect(await screen.findByText(/decision history could not be loaded/i)).toBeInTheDocument();
+  });
+
   it("lets a manager reopen a decided case, and nothing else", async () => {
     renderPanel({
       caseItem: caseItem("approved"),

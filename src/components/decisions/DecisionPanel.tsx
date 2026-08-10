@@ -7,6 +7,7 @@ import type { MemberNameLookup } from "../../services/memberNames";
 import { MAX_RATIONALE_LENGTH } from "../../services/sentinelDecisions";
 import { ActivityFeed } from "../activity/ActivityFeed";
 import { Button } from "../ui/Button";
+import { ErrorState } from "../ui/ErrorState";
 import { LoadingState } from "../ui/LoadingState";
 import { StatusBadge } from "../ui/StatusBadge";
 
@@ -65,14 +66,21 @@ export function DecisionPanel({
 
   // Newest-first: `decisions` is already ordered that way because the feed itself is. This
   // is the panel's own read of "who recommended," derived from the same activity feed the
-  // history below renders — and that feed is capped at DEFAULT_ACTIVITY_LIMIT (50, newest
-  // first, see sentinelActivity.ts). On a case with more than 50 events since its
-  // recommendation, that event falls off the read and this comes back null, so the panel
-  // would offer Approve to the person who recommended. That is a misleading button, not a
-  // hole: guard 9 in sentinel_record_decision reads the recommender from the table directly,
-  // not from this feed, so the write still fails and the database's refusal is what the
-  // reviewer sees. Fixing the display would mean an unbounded read on every render of a
-  // panel that already has the correct backstop.
+  // history below renders, and `decisions` comes back empty on two paths that are not the
+  // same claim. One is a loaded feed capped at DEFAULT_ACTIVITY_LIMIT (50, newest first, see
+  // sentinelActivity.ts) where the recommending event has aged off the read. The other, more
+  // likely in ordinary operation, is the feed simply not having loaded — `activityService`
+  // absent, or the `list()` call failed — which `useActivityFeed` reports as its own error
+  // state, not as an empty feed. Both leave `lastRecommender` null, but only the first is
+  // safe ground for "nobody has recommended, so Approve/Reject are fine": the second means
+  // this panel cannot tell, and `available` below treats a feed-error on a review case as
+  // its own case rather than folding it into "recommendedThis === false", so it does not
+  // hand out a control that would always fail. Either way this stays a misleading-button
+  // risk, not a data-integrity one: guard 9 in sentinel_record_decision reads the
+  // recommender from the table directly, not from this feed, so a write that slipped past
+  // this panel's caution is still refused, and the database's own refusal is what the alert
+  // shows.
+  const feedUnavailable = state.status === "error";
   const lastRecommender = decisions.find((entry) => entry.type === "case-recommended")?.actorId ?? null;
   const isOwner = Boolean(viewerId) && caseItem.ownerId === viewerId;
   const isManager = role === "manager";
@@ -85,6 +93,10 @@ export function DecisionPanel({
     }
     if (!isManager) return [];
     if (caseItem.status === "review") {
+      // Guard 8 lets request-evidence proceed from 'review' unconditionally; guard 9, the
+      // separation-of-duties check, only gates approve/reject. So an unreadable recommender
+      // costs this panel exactly the two actions that depend on knowing who it was.
+      if (feedUnavailable) return ["request-evidence"];
       return recommendedThis ? ["request-evidence"] : ["approve", "reject", "request-evidence"];
     }
     return ["request-evidence"];
@@ -99,6 +111,10 @@ export function DecisionPanel({
 
   const selfRecommendedNote = caseItem.status === "review" && isManager && recommendedThis
     ? "You recommended this case. Another manager must decide it."
+    : null;
+
+  const recommenderUnknownNote = caseItem.status === "review" && isManager && feedUnavailable
+    ? "The recommendation history could not be loaded, so this panel cannot confirm who recommended this case. Approve and reject are withheld until it loads."
     : null;
 
   async function submit(event: React.FormEvent) {
@@ -139,6 +155,7 @@ export function DecisionPanel({
       </div>
 
       {selfRecommendedNote && <p className="decision-recommendation">{selfRecommendedNote}</p>}
+      {recommenderUnknownNote && <p className="decision-recommendation">{recommenderUnknownNote}</p>}
       {withheldReason && <p className="decision-recommendation">{withheldReason}</p>}
 
       {available.length > 0 && (
@@ -184,6 +201,12 @@ export function DecisionPanel({
           <span className="section-meta">Immutable events</span>
         </div>
         {state.status === "loading" && <LoadingState label="Loading decision history" />}
+        {state.status === "error" && (
+          <ErrorState
+            title="Decision history could not be loaded"
+            description="This case may have earlier decisions — the request to read them failed. Reload the page to try again."
+          />
+        )}
         {state.status === "ready" && decisions.length === 0 && <p>No decision has been recorded yet.</p>}
         {decisions.length > 0 && (
           <ActivityFeed
