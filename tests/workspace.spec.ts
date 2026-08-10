@@ -243,6 +243,20 @@ test.describe("analyst workspace", () => {
     expect(byAgent[1]).toMatchObject({ agent_key: "fraud-pattern", status: "waiting" });
   });
 
+  test("the queue reports a stage and filters on it", async ({ page }) => {
+    await page.goto("/cases");
+
+    // Assert something positive first: toHaveCount(0) is satisfied instantly by a page that
+    // has not rendered, which is how an earlier walkthrough reported zero findings against a
+    // database holding three.
+    await expect(page.getByRole("columnheader", { name: /stage/i })).toBeVisible();
+    await expect(page.getByRole("row").filter({ hasText: "Fraud review" }).first()).toBeVisible();
+
+    await page.getByRole("combobox", { name: /stage/i }).selectOption("awaiting-import");
+    await expect(page.getByRole("row").filter({ hasText: "Fraud review" })).toHaveCount(0);
+    await expect(page.getByRole("row").filter({ hasText: "Awaiting import" }).first()).toBeVisible();
+  });
+
   test("rejects an unsupported file extension with a readable error", async ({ page }) => {
     const dialog = await openImportDialog(page);
 
