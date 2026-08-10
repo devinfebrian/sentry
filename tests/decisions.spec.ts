@@ -182,3 +182,70 @@ test.describe("recording a decision", () => {
     }
   });
 });
+
+test.describe("guarding status against the direct-PATCH surface", () => {
+  test.use({ storageState: storageStatePath("manager") });
+
+  test("a manager cannot PATCH status directly", async ({ page }) => {
+    // 20260806044722_sentinel_rls_performance_hardening.sql's merged policy still lets a
+    // manager UPDATE sentinel_investigations directly. sentinel_record_decision must be the
+    // only path that moves status, so the column grant that made that true is asserted here
+    // on its own -- independent of the RPC, which the next test exercises.
+    const token = await signedInToken(page);
+    const managerId = subjectOf(token);
+    const workspaceId = await workspaceIdFor(token);
+    const seeded = await seedCase({ workspaceId, ownerId: managerId, withUpload: true });
+
+    try {
+      // The outcome is what matters, not the status code: a column-privilege refusal (403)
+      // and a request PostgREST accepts but that touches zero rows both look different on
+      // the wire, and either one is a pass -- the only failure is the row actually changing.
+      await rest(token, `sentinel_investigations?id=eq.${seeded.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: "approved" }),
+      });
+
+      const after = await rest(token, `sentinel_investigations?select=status&id=eq.${seeded.id}`);
+      expect(after.body[0].status).toBe("open");
+    } finally {
+      await removeCase(seeded);
+    }
+  });
+
+  test("approve is refused when no recommendation exists", async ({ page }) => {
+    // The regression test for the actual attack: with the direct-PATCH surface still open,
+    // a manager could PATCH status to 'review' and then call approve with no
+    // case-recommended event on the trail. Guard 9 must refuse that even though guard 8's
+    // status precondition is satisfied. The service role is used here only to construct the
+    // state -- it bypasses the column revoke, which is exactly what makes building a
+    // 'review' case with no recommendation possible at all now that the manager's own
+    // session cannot.
+    const token = await signedInToken(page);
+    const managerId = subjectOf(token);
+    const workspaceId = await workspaceIdFor(token);
+    const seeded = await seedCase({ workspaceId, ownerId: managerId, withUpload: true });
+
+    try {
+      const forced = await adminRest(`sentinel_investigations?id=eq.${seeded.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: "review" }),
+      });
+      expect(forced.status, `force status to review: ${JSON.stringify(forced.body)}`).toBe(200);
+
+      const response = await decide(token, {
+        investigationId: seeded.id,
+        workspaceId,
+        action: "approve",
+        rationale: "Approving without any recommendation on record.",
+      });
+
+      expect(response.status, JSON.stringify(response.body)).toBeGreaterThanOrEqual(400);
+      expect(JSON.stringify(response.body)).toMatch(/no recommendation to decide/i);
+
+      const after = await rest(token, `sentinel_investigations?select=status&id=eq.${seeded.id}`);
+      expect(after.body[0].status).toBe("review");
+    } finally {
+      await removeCase(seeded);
+    }
+  });
+});

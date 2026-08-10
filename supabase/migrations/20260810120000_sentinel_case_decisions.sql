@@ -181,16 +181,28 @@ begin
     v_recommendation := 'request-evidence';
   end if;
 
-  -- Guard 9: separation of duties. Cannot misfire for want of a recommender — 'review' is
-  -- only reachable through a recommendation, which guard 8 has already established.
+  -- Guard 9: separation of duties. This fails closed rather than trusting guard 8's status
+  -- check to guarantee a recommender exists: 'review' is reachable by more than this
+  -- function's own transitions. The merged RLS policy in
+  -- 20260806044722_sentinel_rls_performance_hardening.sql grants authenticated a direct
+  -- UPDATE on sentinel_investigations (any manager unconditionally, the assigned analyst
+  -- while status is in ('open','review')), so a manager could PATCH status to 'review'
+  -- directly and then call approve/reject with no case-recommended event on record. Section
+  -- 4 below closes that specific hole by revoking UPDATE(status) from authenticated, but
+  -- guard 9 does not lean on that alone — a select that finds nothing must refuse, not
+  -- silently pass through a null recommender.
   if p_action in ('approve', 'reject') then
     select e.actor_id
     into v_last_recommender
     from public.sentinel_activity_events as e
     where e.investigation_id = p_investigation_id
       and e.event_type = 'case-recommended'
-    order by e.created_at desc
+    order by e.created_at desc, e.id desc
     limit 1;
+
+    if v_last_recommender is null then
+      raise exception using errcode = 'P0001', message = 'This case has no recommendation to decide.';
+    end if;
 
     if v_last_recommender is not distinct from v_actor then
       raise exception using errcode = 'P0001',
@@ -225,3 +237,19 @@ $function$;
 
 revoke all on function public.sentinel_record_decision(uuid, uuid, text, text) from public, anon;
 grant execute on function public.sentinel_record_decision(uuid, uuid, text, text) to authenticated;
+
+-- --------------------------------------------------------------------------------------
+-- 4. status leaves the direct-PATCH surface
+-- --------------------------------------------------------------------------------------
+-- The merged policy in 20260806044722_sentinel_rls_performance_hardening.sql still grants
+-- authenticated a direct UPDATE on sentinel_investigations (any manager unconditionally,
+-- the assigned analyst while status is in ('open','review')), which let a manager PATCH
+-- status straight to 'review' or 'approved' with nothing in the audit trail. Nothing in the
+-- app updates status through that surface — create() inserts it once, and from here on only
+-- sentinel_record_decision moves it, as the owner of its security definer privilege — so
+-- this costs the app nothing. Every other column stays updatable through the existing
+-- policy. Same technique as invited_email on sentinel_members: a column-level revoke,
+-- not a narrower policy, because the column needs to disappear for every role at once
+-- rather than be re-litigated per policy.
+
+revoke update (status) on public.sentinel_investigations from authenticated;
