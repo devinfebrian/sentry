@@ -9,6 +9,9 @@ declare
   unrated_deterministic integer;
   rated_fraud integer;
   distinct_stages integer;
+  queue_rows integer;
+  investigation_rows integer;
+  analysed_without_a_run integer;
 begin
   if not exists (
     select 1 from information_schema.columns
@@ -91,6 +94,28 @@ begin
   select count(distinct stage) into distinct_stages from public.sentinel_investigation_queue;
   if distinct_stages < 2 then
     raise exception 'every case shares one stage; the Stage filter would be inert';
+  end if;
+
+  -- One row per investigation. The view joins through uploads and findings by design, and
+  -- a join that fans out would multiply a case across the queue rather than describing it
+  -- once.
+  select count(*) into queue_rows from public.sentinel_investigation_queue;
+  select count(*) into investigation_rows from public.sentinel_investigations;
+  if queue_rows <> investigation_rows then
+    raise exception 'sentinel_investigation_queue has % rows for % investigations; the join is fanning out', queue_rows, investigation_rows;
+  end if;
+
+  -- An upload with no run row at all must never read 'analysed'. 'analysed' means every
+  -- upload's agents finished; an upload nothing has run against has not finished, it has
+  -- not started — the gap parse-upload leaves between seeding an upload and seeding its
+  -- run rows.
+  select count(*) into analysed_without_a_run
+  from public.sentinel_investigation_queue q
+  join public.sentinel_uploads u on u.investigation_id = q.id
+  where q.stage = 'analysed'
+    and not exists (select 1 from public.sentinel_agent_runs r where r.upload_id = u.id);
+  if analysed_without_a_run > 0 then
+    raise exception 'an upload with no agent run read as analysed: % rows', analysed_without_a_run;
   end if;
 
   raise notice 'sentinel_case_risk_and_stage verified';
