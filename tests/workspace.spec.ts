@@ -360,12 +360,34 @@ test.describe("analyst workspace", () => {
 
     await stageFilter.selectOption(stageValue!);
 
-    await expect(dataRows.first()).toBeVisible();
-    const filteredCount = await dataRows.count();
-    expect(filteredCount).toBeGreaterThan(0);
-    for (let index = 0; index < filteredCount; index += 1) {
-      await expect(dataRows.nth(index).locator("td").nth(1)).toHaveText(stageLabel);
-    }
+    // Re-read the whole column together, and retry the whole read, rather than reading once
+    // right after selectOption(). Two failure modes live here, and both come from the same
+    // root cause: this suite runs fullyParallel against a workspace shared with every other
+    // spec plus the decision-handoff test's own seed and delete, so the table this test reads
+    // can keep changing under it.
+    //   1. selectOption() only waits for the <select>'s DOM value to change and its change
+    //      event to fire -- not for CaseQueue's own re-render in response -- and a row already
+    //      visible under the *previous*, unfiltered view satisfies a bare toBeVisible() with
+    //      nothing left to wait for, so that check alone does not prove the filtered render has
+    //      landed. Read too early and the "filtered" rows are still the old unfiltered set.
+    //   2. Counting the rows once and then re-querying by index in a loop afterwards -- N
+    //      sequential awaited round trips against a live DOM -- leaves a window after the count
+    //      for a concurrent seed or delete to shift row order out from under a stale index,
+    //      surfacing as "element(s) not found".
+    // allTextContents() sidesteps #2 by reading the whole column in one call, so there is no
+    // window between reads for a row to have moved. expect.poll sidesteps #1 by re-running that
+    // one-call read on every attempt until the filtered table has actually settled, rather than
+    // trusting the first read to already reflect it -- and only fails for real once a mismatch
+    // survives every retry, which is what a genuine product bug would do.
+    //
+    // td:nth-of-type(2) is the stage column: the row's first cell is a th[scope="row"] (the
+    // case link), not a td, so the stage column's position among the row's td siblings (2nd) is
+    // one less than its position among all cells -- nth-of-type counts only same-tag siblings,
+    // so it lands on the right cell without depending on the th's presence.
+    await expect.poll(async () => {
+      const labels = await dataRows.locator("td:nth-of-type(2)").allTextContents();
+      return labels.length > 0 && labels.every((label) => label.trim() === stageLabel);
+    }, { message: "every filtered row must show the selected stage" }).toBe(true);
   });
 
   test("rejects an unsupported file extension with a readable error", async ({ page }) => {
