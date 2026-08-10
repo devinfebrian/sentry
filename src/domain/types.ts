@@ -8,6 +8,25 @@ export type AgentStatus =
 
 export type RiskLevel = "low" | "medium" | "high" | "not-assessed";
 
+/** How much a finding matters. Null where no producer rated it. */
+export type Severity = "low" | "medium" | "high";
+
+/**
+ * What a case needs next, derived from its agent runs.
+ *
+ * The design spec's `evidence-review` and `reporting` are deliberately absent: nothing
+ * writes sentinel_evidence.state, so no case can enter or leave evidence review, and the
+ * decision and report steps are fixture-backed. They return when something can move a case
+ * through them.
+ */
+export type CaseStage =
+  | "awaiting-import"
+  | "analysing"
+  | "analysis-failed"
+  | "awaiting-analysis"
+  | "fraud-review"
+  | "analysed";
+
 export type EvidenceState =
   | "unreviewed"
   | "reviewed"
@@ -35,11 +54,10 @@ export interface CaseSummary {
   entity: string;
   owner: string;
   risk: RiskLevel;
-  stageId: string;
+  stageId: CaseStage;
   status: "open" | "review" | "approved" | "closed";
   ageDays: number;
   lastActivity: string;
-  analysisStatus?: "not-started";
 }
 
 export interface SentinelInvestigationService {
@@ -91,6 +109,7 @@ export interface Finding {
   agent: string;
   summary: string;
   confidence: number;
+  severity: Severity | null;
   evidenceIds: string[];
   contradictoryEvidenceIds: string[];
 }

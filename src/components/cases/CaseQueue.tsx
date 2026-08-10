@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { formatRelative } from "../../lib/datetime";
-import type { CaseSummary, RiskLevel } from "../../domain/types";
+import type { CaseStage, CaseSummary, RiskLevel } from "../../domain/types";
 import { StatusBadge } from "../ui/StatusBadge";
 
 interface CaseQueueProps {
@@ -12,12 +12,13 @@ type SortKey = "entity" | "owner" | "ageDays";
 type SortDirection = "asc" | "desc";
 
 const riskLabels: Record<RiskLevel, string> = { low: "Low risk", medium: "Medium risk", high: "High risk", "not-assessed": "Not assessed" };
-const stageLabels: Record<string, string> = {
-  "financial-analysis": "Financial analysis",
-  "fraud-pattern": "Fraud patterns",
-  "evidence-review": "Evidence review",
-  reporting: "Reporting",
-  "not-started": "Analysis not started",
+const stageLabels: Record<CaseStage, string> = {
+  "awaiting-import": "Analysis not started",
+  analysing: "Analysing",
+  "analysis-failed": "Analysis failed",
+  "awaiting-analysis": "Awaiting analysis",
+  "fraud-review": "Fraud review",
+  analysed: "Analysed",
 };
 
 function riskTone(risk: RiskLevel) {

@@ -101,6 +101,8 @@ export function createSentinelAnalysisService(
           agent: row.agent,
           summary: row.summary,
           confidence: row.confidence,
+          // Not yet selected from sentinel_findings.severity — this read path predates it.
+          severity: null,
           // The domain splits evidence by relevance; the table stores it as one column.
           evidenceIds: linked.filter((item) => item.relevance === "supporting").map((item) => item.id),
           contradictoryEvidenceIds: linked.filter((item) => item.relevance === "contradictory").map((item) => item.id),

@@ -10,11 +10,10 @@ const importedCase: CaseSummary = {
   entity: "Imported Company",
   owner: "test-user",
   risk: "not-assessed",
-  stageId: "not-started",
+  stageId: "awaiting-import",
   status: "open",
   ageDays: 0,
   lastActivity: "2026-08-06T10:00:00.000Z",
-  analysisStatus: "not-started",
 };
 
 function serviceWithList(list: () => Promise<CaseSummary[]>): Pick<SentinelInvestigationService, "list"> {

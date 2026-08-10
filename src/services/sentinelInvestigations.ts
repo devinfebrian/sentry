@@ -1,8 +1,25 @@
 import type { PostgrestMaybeSingleResponse, PostgrestResponse, PostgrestSingleResponse } from "@supabase/supabase-js";
-import type { CaseSummary, SentinelInvestigationService } from "../domain/types";
+import type { CaseStage, CaseSummary, RiskLevel, SentinelInvestigationService } from "../domain/types";
 import type { Database } from "../lib/database.types";
 
-type InvestigationRow = Database["public"]["Tables"]["sentinel_investigations"]["Row"];
+/**
+ * The queue view's shape, declared here rather than in database.types.ts. That file is
+ * hand-curated and analysis relations stay out of it by convention; regenerating it to pick
+ * up this view would replace hand-narrowed unions elsewhere with bare strings.
+ */
+type InvestigationRow = {
+  id: string;
+  workspace_id: string;
+  reference: string;
+  entity: string;
+  owner_id: string | null;
+  status: "open" | "review" | "approved" | "closed";
+  created_at: string;
+  updated_at: string;
+  risk: RiskLevel;
+  stage: string;
+};
+
 type InvestigationInsert = Database["public"]["Tables"]["sentinel_investigations"]["Insert"];
 type InvestigationContext = {
   workspaceId: string;
@@ -27,7 +44,7 @@ type InvestigationInsertQuery = {
 };
 
 export type SentinelInvestigationClient = {
-  from(table: "sentinel_investigations"): {
+  from(table: "sentinel_investigations" | "sentinel_investigation_queue"): {
     select(columns: "*"): InvestigationReadQuery;
     insert(values: InvestigationInsert): InvestigationInsertQuery;
   };
@@ -61,6 +78,19 @@ export function resolveOwner(ownerId: string | null, names?: OwnerNames) {
   return `Member ${ownerId.slice(0, 8)}`;
 }
 
+const caseStages: readonly CaseStage[] = [
+  "awaiting-import", "analysing", "analysis-failed", "awaiting-analysis", "fraud-review", "analysed",
+];
+
+/**
+ * The view is constrained to these six, but the client cannot prove that. An unrecognised
+ * value falls back to the stage that claims the least rather than reaching a table cell as
+ * a raw slug.
+ */
+function toStage(value: string): CaseStage {
+  return (caseStages as readonly string[]).includes(value) ? (value as CaseStage) : "awaiting-import";
+}
+
 function mapRow(row: InvestigationRow, names?: OwnerNames): CaseSummary {
   const createdAt = Date.parse(row.created_at);
   const ageDays = Number.isFinite(createdAt)
@@ -72,12 +102,11 @@ function mapRow(row: InvestigationRow, names?: OwnerNames): CaseSummary {
     databaseId: row.id,
     entity: row.entity,
     owner: resolveOwner(row.owner_id, names),
-    risk: "not-assessed",
-    stageId: "not-started",
+    risk: row.risk,
+    stageId: toStage(row.stage),
     status: row.status,
     ageDays,
     lastActivity: row.updated_at,
-    analysisStatus: "not-started",
   };
 }
 
@@ -98,7 +127,7 @@ export function createSentinelInvestigationService(
   return {
     async list() {
       const { data, error } = await client
-        .from("sentinel_investigations")
+        .from("sentinel_investigation_queue")
         .select("*")
         .eq("workspace_id", context.workspaceId)
         .order("created_at", { ascending: false });
@@ -110,7 +139,7 @@ export function createSentinelInvestigationService(
 
     async getById(id) {
       const { data, error } = await client
-        .from("sentinel_investigations")
+        .from("sentinel_investigation_queue")
         .select("*")
         .eq("workspace_id", context.workspaceId)
         .eq("reference", id)
@@ -137,7 +166,9 @@ export function createSentinelInvestigationService(
 
         if (!error) {
           if (!data) throw new Error("Unable to create investigation: Supabase returned no investigation.");
-          return mapRow(data);
+          // The insert returns the table row, which has no derived columns. A brand-new case
+          // has no uploads and no findings, so this is what the view would say about it.
+          return mapRow({ ...data, risk: "not-assessed", stage: "awaiting-import" });
         }
 
         if (error.code !== "23505" || attempt === maxCreateAttempts - 1) {

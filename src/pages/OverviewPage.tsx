@@ -6,7 +6,7 @@ import { EmptyState } from "../components/ui/EmptyState";
 import { ErrorState } from "../components/ui/ErrorState";
 import { LoadingState } from "../components/ui/LoadingState";
 import { StatusBadge } from "../components/ui/StatusBadge";
-import type { AgentStage, CaseSummary, SentinelInvestigationService } from "../domain/types";
+import type { AgentStage, CaseStage, CaseSummary, SentinelInvestigationService } from "../domain/types";
 import type { RefObject } from "react";
 
 export interface OverviewDemoData {
@@ -22,12 +22,13 @@ export interface OverviewPageProps {
 }
 
 const riskLabels = { low: "Low risk", medium: "Medium risk", high: "High risk", "not-assessed": "Not assessed" } as const;
-const stageLabels: Record<string, string> = {
-  "financial-analysis": "Financial analysis",
-  "fraud-pattern": "Fraud patterns",
-  "evidence-review": "Evidence review",
-  reporting: "Reporting",
-  "not-started": "Analysis not started",
+const stageLabels: Record<CaseStage, string> = {
+  "awaiting-import": "Analysis not started",
+  analysing: "Analysing",
+  "analysis-failed": "Analysis failed",
+  "awaiting-analysis": "Awaiting analysis",
+  "fraud-review": "Fraud review",
+  analysed: "Analysed",
 };
 
 type LoadState =

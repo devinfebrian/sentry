@@ -35,7 +35,7 @@ export function CaseHeader({ caseItem, currentStep }: CaseHeaderProps) {
       <nav className="case-step-rail" aria-label="Case steps">
         {steps.map((step, index) => {
           const active = currentStep === step.id;
-          const complete = caseItem.analysisStatus !== "not-started" && index < currentIndex;
+          const complete = caseItem.stageId === "analysed" && index < currentIndex;
           return <Link className={`case-step ${active ? "case-step-active" : ""} ${complete ? "case-step-complete" : ""}`} aria-current={active ? "step" : undefined} to={`/cases/${caseItem.id}/${step.id}`} key={step.id}><span className="numeric" aria-hidden="true">{String(index + 1).padStart(2, "0")}</span><span>{step.label}</span>{complete && <span className="case-step-state">Complete</span>}</Link>;
         })}
       </nav>
