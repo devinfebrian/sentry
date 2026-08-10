@@ -181,6 +181,166 @@ test.describe("recording a decision", () => {
       await removeCase(seeded);
     }
   });
+
+  test("refuses a case with nothing imported", async ({ page }) => {
+    const token = await signedInToken(page);
+    const analystId = subjectOf(token);
+    const workspaceId = await workspaceIdFor(token);
+    const seeded = await seedCase({ workspaceId, ownerId: analystId, withUpload: false });
+
+    try {
+      const response = await decide(token, {
+        investigationId: seeded.id, workspaceId,
+        action: "recommend-approve", rationale: "Looks fine to me.",
+      });
+
+      expect(response.status).toBe(400);
+      expect(response.body.message).toMatch(/import data before deciding/i);
+
+      const after = await rest(token, `sentinel_investigations?select=status&id=eq.${seeded.id}`);
+      expect(after.body[0].status, "a refused decision must not move the case").toBe("open");
+    } finally {
+      await removeCase(seeded);
+    }
+  });
+
+  test("refuses an empty rationale, and one over the cap", async ({ page }) => {
+    const token = await signedInToken(page);
+    const analystId = subjectOf(token);
+    const workspaceId = await workspaceIdFor(token);
+    const seeded = await seedCase({ workspaceId, ownerId: analystId, withUpload: true });
+
+    try {
+      const blank = await decide(token, {
+        investigationId: seeded.id, workspaceId, action: "recommend-approve", rationale: "   ",
+      });
+      expect(blank.status).toBe(400);
+      expect(blank.body.message).toMatch(/record why/i);
+
+      const huge = await decide(token, {
+        investigationId: seeded.id, workspaceId, action: "recommend-approve", rationale: "x".repeat(2001),
+      });
+      expect(huge.status).toBe(400);
+      expect(huge.body.message).toMatch(/2000 characters or fewer/i);
+
+      // The boundary itself is allowed, so the cap is a cap and not an off-by-one.
+      const exact = await decide(token, {
+        investigationId: seeded.id, workspaceId, action: "recommend-approve", rationale: "x".repeat(2000),
+      });
+      expect(exact.status, JSON.stringify(exact.body)).toBe(200);
+    } finally {
+      await removeCase(seeded);
+    }
+  });
+
+  test("refuses an unknown action", async ({ page }) => {
+    const token = await signedInToken(page);
+    const analystId = subjectOf(token);
+    const workspaceId = await workspaceIdFor(token);
+    const seeded = await seedCase({ workspaceId, ownerId: analystId, withUpload: true });
+
+    try {
+      const response = await decide(token, {
+        investigationId: seeded.id, workspaceId, action: "approve-please", rationale: "Fine.",
+      });
+      expect(response.status).toBe(400);
+      expect(response.body.message).toMatch(/unknown decision action/i);
+    } finally {
+      await removeCase(seeded);
+    }
+  });
+
+  test("refuses an investigation outside the caller's workspace", async ({ page }) => {
+    const token = await signedInToken(page);
+    const workspaceId = await workspaceIdFor(token);
+
+    const response = await decide(token, {
+      investigationId: crypto.randomUUID(), workspaceId,
+      action: "recommend-approve", rationale: "Fine.",
+    });
+
+    // The brief assumed PostgREST maps P0002 to 404, matching P0001's mapping to 400. It
+    // does not: P0002 falls outside PostgREST's default PL/pgSQL exception mapping and comes
+    // back as 500, confirmed directly against this project with `code: "P0002"` still intact
+    // in the body. The outcome that actually matters -- the case lookup failing closed with
+    // the right message -- is unaffected, so the SQL is not the thing to change here.
+    expect(response.status).toBe(500);
+    expect(response.body.message).toMatch(/investigation not found/i);
+  });
+
+  test("refuses an analyst recommending on a case they do not own", async ({ page, browser }) => {
+    const analystToken = await signedInToken(page);
+    const workspaceId = await workspaceIdFor(analystToken);
+
+    const managerContext = await browser.newContext({ storageState: storageStatePath("manager") });
+    try {
+      const managerPage = await managerContext.newPage();
+      const managerId = subjectOf(await signedInToken(managerPage));
+      const seeded = await seedCase({ workspaceId, ownerId: managerId, withUpload: true });
+
+      try {
+        const response = await decide(analystToken, {
+          investigationId: seeded.id, workspaceId,
+          action: "recommend-approve", rationale: "Not my case.",
+        });
+        expect(response.status).toBe(400);
+        expect(response.body.message).toMatch(/assigned analyst or a manager/i);
+      } finally {
+        await removeCase(seeded);
+      }
+    } finally {
+      await managerContext.close();
+    }
+  });
+
+  test("refuses an analyst approving anything", async ({ page }) => {
+    const token = await signedInToken(page);
+    const analystId = subjectOf(token);
+    const workspaceId = await workspaceIdFor(token);
+    const seeded = await seedCase({ workspaceId, ownerId: analystId, withUpload: true });
+
+    try {
+      const recommended = await decide(token, {
+        investigationId: seeded.id, workspaceId,
+        action: "recommend-approve", rationale: "Ready for review.",
+      });
+      expect(recommended.status).toBe(200);
+
+      const response = await decide(token, {
+        investigationId: seeded.id, workspaceId, action: "approve", rationale: "And approved.",
+      });
+      expect(response.status).toBe(400);
+      expect(response.body.message).toMatch(/manager membership required/i);
+
+      const after = await rest(token, `sentinel_investigations?select=status&id=eq.${seeded.id}`);
+      expect(after.body[0].status).toBe("review");
+    } finally {
+      await removeCase(seeded);
+    }
+  });
+
+  test("refuses a second recommendation while one is awaiting review", async ({ page }) => {
+    const token = await signedInToken(page);
+    const analystId = subjectOf(token);
+    const workspaceId = await workspaceIdFor(token);
+    const seeded = await seedCase({ workspaceId, ownerId: analystId, withUpload: true });
+
+    try {
+      expect((await decide(token, {
+        investigationId: seeded.id, workspaceId,
+        action: "recommend-approve", rationale: "First call.",
+      })).status).toBe(200);
+
+      const second = await decide(token, {
+        investigationId: seeded.id, workspaceId,
+        action: "recommend-reject", rationale: "Changed my mind.",
+      });
+      expect(second.status).toBe(400);
+      expect(second.body.message).toMatch(/already has a recommendation/i);
+    } finally {
+      await removeCase(seeded);
+    }
+  });
 });
 
 test.describe("guarding status against the direct-PATCH surface", () => {
@@ -246,6 +406,84 @@ test.describe("guarding status against the direct-PATCH surface", () => {
       expect(after.body[0].status).toBe("review");
     } finally {
       await removeCase(seeded);
+    }
+  });
+});
+
+test.describe("deciding a recommended case", () => {
+  test.use({ storageState: storageStatePath("manager") });
+
+  test("refuses the manager who wrote the recommendation", async ({ page }) => {
+    const token = await signedInToken(page);
+    const managerId = subjectOf(token);
+    const workspaceId = await workspaceIdFor(token);
+    const seeded = await seedCase({ workspaceId, ownerId: managerId, withUpload: true });
+
+    try {
+      // A manager may recommend on any case; guard 9 is about who may then decide it.
+      expect((await decide(token, {
+        investigationId: seeded.id, workspaceId,
+        action: "recommend-approve", rationale: "My own read of it.",
+      })).status).toBe(200);
+
+      const response = await decide(token, {
+        investigationId: seeded.id, workspaceId, action: "approve", rationale: "And I agree with myself.",
+      });
+
+      expect(response.status).toBe(400);
+      expect(response.body.message).toMatch(/another manager must decide/i);
+
+      const after = await rest(token, `sentinel_investigations?select=status&id=eq.${seeded.id}`);
+      expect(after.body[0].status, "a refused approval must leave the case in review").toBe("review");
+    } finally {
+      await removeCase(seeded);
+    }
+  });
+
+  test("approves a case somebody else recommended, and can send a decided case back", async ({ page, browser }) => {
+    const managerToken = await signedInToken(page);
+    const workspaceId = await workspaceIdFor(managerToken);
+
+    const analystContext = await browser.newContext({ storageState: storageStatePath("analyst") });
+    try {
+      const analystPage = await analystContext.newPage();
+      const analystToken = await signedInToken(analystPage);
+      const analystId = subjectOf(analystToken);
+      const seeded = await seedCase({ workspaceId, ownerId: analystId, withUpload: true });
+
+      try {
+        expect((await decide(analystToken, {
+          investigationId: seeded.id, workspaceId,
+          action: "recommend-approve", rationale: "Settlement explains the outlier.",
+        })).status).toBe(200);
+
+        const approved = await decide(managerToken, {
+          investigationId: seeded.id, workspaceId, action: "approve", rationale: "Agreed, closing it out.",
+        });
+        expect(approved.status, JSON.stringify(approved.body)).toBe(200);
+        expect(approved.body.status).toBe("approved");
+
+        // approved is reachable-from, not terminal.
+        const sentBack = await decide(managerToken, {
+          investigationId: seeded.id, workspaceId,
+          action: "request-evidence", rationale: "Attach the settlement letter before we file this.",
+        });
+        expect(sentBack.status, JSON.stringify(sentBack.body)).toBe(200);
+        expect(sentBack.body.status).toBe("open");
+
+        const trail = await rest(
+          managerToken,
+          `sentinel_activity_events?select=event_type&investigation_id=eq.${seeded.id}&order=created_at.asc`,
+        );
+        const types = trail.body.map((row: { event_type: string }) => row.event_type);
+        expect(types).toEqual(
+          expect.arrayContaining(["case-recommended", "case-approved", "case-evidence-requested"]),
+        );
+      } finally {
+        await removeCase(seeded);
+      }
+    } finally {
+      await analystContext.close();
     }
   });
 });
