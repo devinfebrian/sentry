@@ -129,7 +129,7 @@ The 19 in `awaiting-analysis` are the uploads parsed before agents existed, seed
 
 `src/domain/types.ts` gains `Severity`, and `CaseSummary.stageId` narrows from `string` to a `CaseStage` union so an unhandled stage is a compile error rather than a raw slug rendered in a table cell. `Finding` gains `severity: Severity | null`.
 
-`analysisStatus` is deleted. It is optional, only ever holds `"not-started"`, and exists solely so `CaseHeader` can gate step completion at `caseItem.analysisStatus !== "not-started"` — a condition that is currently always false. That gate becomes `stage === "analysed"`, which is the thing it was always trying to express. This is cleanup inside code the slice already changes, not a general refactor.
+`analysisStatus` is deleted. It is optional, only ever holds `"not-started"`, and exists solely so `CaseHeader` can gate step completion at `caseItem.analysisStatus !== "not-started"` — a condition that is currently always false. That gate becomes `stage === "analysed"` restricted to the summary and findings steps, which is the thing it was always trying to express: `analysed` means both agents finished, and says nothing about evidence review or a decision, so those two steps and report never read `Complete` regardless of stage. This is cleanup inside code the slice already changes, not a general refactor.
 
 `sentinelInvestigations.ts` reads the view in `list()` and `getById()`. `create()` still inserts into `sentinel_investigations` — the view is read-only — and maps its result to `not-assessed` / `awaiting-import`, which is exactly true for an investigation with no uploads.
 
@@ -147,7 +147,7 @@ Null severity is a first-class value at every layer and is never coerced to `low
 
 Unit tests at the threshold boundaries, where an off-by-one is invisible: exactly 3 duplicate rows, exactly 4× and exactly 10× the median, exactly 10% missing. `validateFindings` with severity absent, with a value outside the enum, and with a non-string — each keeping the finding and leaving severity null. `CaseQueue` filters returning real subsets rather than everything or nothing, which is the regression that would return this feature to its starting state. `sentinelInvestigations` mapping view rows, including a row with `risk = null`.
 
-`supabase/verify_sentinel_finding_severity.sql` asserts the column and its CHECK, `security_invoker = true` on the view, and the backfill's resulting counts per rule. Function assertions use `oidvectortypes(proc.proargtypes)`.
+`supabase/verify_sentinel_case_risk_and_stage.sql` asserts the column and its CHECK, `security_invoker = true` on the view, and the backfill's resulting counts per rule. Function assertions use `oidvectortypes(proc.proargtypes)`.
 
 One end-to-end test drives a case to `fraud-review` and filters on it. Assertions of absence must follow a positive assertion — `toHaveCount(0)` is satisfied instantly by a page that has not rendered — and the DOM is polled with an auto-waiting matcher after a single navigation, never with `reload()` inside `expect.poll`.
 
