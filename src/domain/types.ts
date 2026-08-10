@@ -114,7 +114,7 @@ export interface Finding {
   contradictoryEvidenceIds: string[];
 }
 
-/** The nine values permitted by the sentinel_activity_events event_type CHECK. */
+/** The fifteen values permitted by the sentinel_activity_events event_type CHECK. */
 export type ActivityEventType =
   | "investigation-created"
   | "upload-created"
@@ -124,7 +124,13 @@ export type ActivityEventType =
   | "member-invited"
   | "member-activated"
   | "member-role-changed"
-  | "member-invite-rejected";
+  | "member-invite-rejected"
+  | "analysis-completed"
+  | "analysis-failed"
+  | "case-recommended"
+  | "case-approved"
+  | "case-rejected"
+  | "case-evidence-requested";
 
 /**
  * A recorded workspace event. Deliberately distinct from `ActivityEvent` below, which is a
@@ -138,6 +144,11 @@ export interface ActivityEntry {
   /** jsonb, so the shape varies per event type — read it through safe accessors. */
   metadata: Record<string, unknown>;
   occurredAt: string;
+  /**
+   * The actor's own words, on the events that have an author. Null everywhere else — a
+   * parse did not have a reason, it had a result.
+   */
+  rationale?: string | null;
 }
 
 /** Findings and their evidence for one investigation, read together. */

@@ -57,6 +57,7 @@ describe("createSentinelActivityService", () => {
         investigationId,
         actorId: "actor-1",
         type: "parse-completed",
+        rationale: null,
         metadata: { rowCount: 3, warningCount: 0 },
         occurredAt: "2026-08-09T09:00:00.000Z",
       },

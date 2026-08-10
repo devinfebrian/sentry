@@ -787,6 +787,14 @@ kbd {
   font-weight: 500;
 }
 
+.activity-rationale {
+  display: block;
+  margin-top: 0.35rem;
+  padding-left: 0.75rem;
+  border-left: 2px solid var(--color-rule);
+  color: var(--color-slate);
+}
+
 .queue-toolbar {
   display: flex;
   align-items: end;
