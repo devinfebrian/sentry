@@ -18,7 +18,7 @@ const findingRow = {
   agent: "Financial analysis",
   summary: "Whale records 400, 4x the median of 100",
   confidence: 1,
-  severity: null,
+  severity: null as "low" | "medium" | "high" | null,
   created_at: "2026-08-09T09:00:00.000Z",
   sentinel_evidence: [
     {
