@@ -48,14 +48,30 @@ export interface AgentStage {
   outputCount?: number;
 }
 
+export type CaseStatus = "open" | "review" | "approved" | "closed";
+
+export type DecisionAction =
+  | "recommend-approve"
+  | "recommend-reject"
+  | "approve"
+  | "reject"
+  | "request-evidence";
+
+export interface SentinelDecisionService {
+  record(investigationId: string, action: DecisionAction, rationale: string): Promise<{ status: CaseStatus }>;
+}
+
 export interface CaseSummary {
   id: string;
   databaseId: string;
   entity: string;
+  /** The resolved display name, for reading. */
   owner: string;
+  /** The identifier, for deciding whether the viewer is the owner. */
+  ownerId: string | null;
   risk: RiskLevel;
   stageId: CaseStage;
-  status: "open" | "review" | "approved" | "closed";
+  status: CaseStatus;
   ageDays: number;
   lastActivity: string;
 }

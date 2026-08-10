@@ -60,12 +60,12 @@ export const fixtureCases: CaseSummary[] = [
   // real view's own rules (pipeline.running > 0 => 'analysing'), that pipeline is a case
   // still in progress, and this is the one demo case whose other steps get real content, so
   // its stage badge has to agree with what its own summary panel renders underneath it.
-  { id: "INV-0248", databaseId: "00000000-0000-4000-8000-000000000248", entity: "Northstar Ltd", owner: "Maya Chen", risk: "high", stageId: "analysing", status: "review", ageDays: 2, lastActivity: "12 min ago" },
-  { id: "INV-0245", databaseId: "00000000-0000-4000-8000-000000000245", entity: "Orchid Supply", owner: "Rafael Cole", risk: "medium", stageId: "awaiting-analysis", status: "open", ageDays: 4, lastActivity: "38 min ago" },
-  { id: "INV-0241", databaseId: "00000000-0000-4000-8000-000000000241", entity: "Delta Works", owner: "Jaya Singh", risk: "low", stageId: "analysed", status: "open", ageDays: 6, lastActivity: "1 hr ago" },
-  { id: "INV-0239", databaseId: "00000000-0000-4000-8000-000000000239", entity: "Blue Harbor Group", owner: "Maya Chen", risk: "high", stageId: "fraud-review", status: "review", ageDays: 7, lastActivity: "2 hrs ago" },
-  { id: "INV-0237", databaseId: "00000000-0000-4000-8000-000000000237", entity: "Pine & Ledger", owner: "Rafael Cole", risk: "medium", stageId: "analysed", status: "approved", ageDays: 9, lastActivity: "Yesterday" },
-  { id: "INV-0232", databaseId: "00000000-0000-4000-8000-000000000232", entity: "Aster Mobility", owner: "Jaya Singh", risk: "low", stageId: "analysed", status: "closed", ageDays: 14, lastActivity: "3 days ago" },
+  { id: "INV-0248", databaseId: "00000000-0000-4000-8000-000000000248", entity: "Northstar Ltd", owner: "Maya Chen", ownerId: null, risk: "high", stageId: "analysing", status: "review", ageDays: 2, lastActivity: "12 min ago" },
+  { id: "INV-0245", databaseId: "00000000-0000-4000-8000-000000000245", entity: "Orchid Supply", owner: "Rafael Cole", ownerId: null, risk: "medium", stageId: "awaiting-analysis", status: "open", ageDays: 4, lastActivity: "38 min ago" },
+  { id: "INV-0241", databaseId: "00000000-0000-4000-8000-000000000241", entity: "Delta Works", owner: "Jaya Singh", ownerId: null, risk: "low", stageId: "analysed", status: "open", ageDays: 6, lastActivity: "1 hr ago" },
+  { id: "INV-0239", databaseId: "00000000-0000-4000-8000-000000000239", entity: "Blue Harbor Group", owner: "Maya Chen", ownerId: null, risk: "high", stageId: "fraud-review", status: "review", ageDays: 7, lastActivity: "2 hrs ago" },
+  { id: "INV-0237", databaseId: "00000000-0000-4000-8000-000000000237", entity: "Pine & Ledger", owner: "Rafael Cole", ownerId: null, risk: "medium", stageId: "analysed", status: "approved", ageDays: 9, lastActivity: "Yesterday" },
+  { id: "INV-0232", databaseId: "00000000-0000-4000-8000-000000000232", entity: "Aster Mobility", owner: "Jaya Singh", ownerId: null, risk: "low", stageId: "analysed", status: "closed", ageDays: 14, lastActivity: "3 days ago" },
 ];
 
 export const fixtureEvidence: EvidenceRecord[] = [

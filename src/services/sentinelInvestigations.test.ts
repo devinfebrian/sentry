@@ -160,6 +160,7 @@ describe("createSentinelInvestigationService", () => {
         // No name source supplied, so the owner degrades to a recognisable fragment
         // rather than a full UUID.
         owner: `Member ${row.owner_id}`,
+        ownerId: row.owner_id,
         risk: row.risk,
         stageId: row.stage,
         status: row.status,
@@ -184,6 +185,15 @@ describe("createSentinelInvestigationService", () => {
     await createSentinelInvestigationService(client, context).list();
 
     expect(from).toHaveBeenCalledWith("sentinel_investigation_queue");
+  });
+
+  it("returns the owner id alongside the resolved name, so a page can ask whether it is yours", async () => {
+    const { query } = fakeReadQuery(successResponse([{ ...row, owner_id: "user-7" }]), successResponse(row));
+    const { client } = fakeReadClient(query);
+    const [summary] = await createSentinelInvestigationService(client, context).list();
+
+    expect(summary.ownerId).toBe("user-7");
+    expect(summary.owner).not.toBe("user-7");
   });
 
   it("reports a stage the view did not produce as awaiting-import rather than rendering a raw slug", async () => {
