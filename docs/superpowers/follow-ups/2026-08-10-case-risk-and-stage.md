@@ -64,11 +64,9 @@ also lets any future per-case caller that forgets to pass `stage` compile cleanl
 blank line instead of failing loudly, the same shape of bug `CASE_STAGE_LABELS`'s
 `Record<CaseStage, string>` typing was built to catch one layer down.
 
-**Whether `invite-member` is still serving its v6 build.** Unresolved from the two prior notes
-and not re-checked in this slice — the deploy tooling available to this task was scoped to
-Steps 4 and 5 only, with the two Edge Function deploys this slice does need (`parse-upload`,
-`analyze-upload`) gated on human approval and out of reach here, so checking an unrelated
-function's version was out of scope too. It is not this slice's job to fix, but the note should
+**`invite-member` is still serving its v6 build.** Checked and confirmed unchanged from the two
+prior notes: still the `_6` build from 2026-08-06, `display_name` seeding and the active-member
+message merged, tested, and not live. It is not this slice's job to fix, but the note should
 keep saying so rather than let it drop a third time.
 
 ## Traps worth not rediscovering
@@ -93,6 +91,22 @@ both risk and stage filters that look alike.** `CaseQueue.tsx`'s stage `<select>
 (`awaiting-import`) and the visible text is the label (`Awaiting import`). `selectOption` needs
 the slug; row-text assertions need the label. Mixing them selects nothing and matches nothing,
 silently, since neither Playwright call throws for a bad option value here.
+
+**Running `tests/workspace.spec.ts` against the live workspace writes findings with whatever
+agent build is deployed at that moment — and the rows outlive the run.** `imports a CSV,
+creates a persisted investigation...` and the other upload tests are not sandboxed: they import
+real files into the real workspace and let the real deployed `parse-upload`/`analyze-upload`
+analyse them. The 06:52 run of this suite for Step 4 executed against the pre-deploy build,
+before `analyze-upload` knew severity existed, and left six deterministic findings null and two
+live cases reading `Fraud review / Not assessed` while holding three findings each — the exact
+self-contradiction this slice exists to remove, reintroduced by the slice's own test run, with
+no error anywhere to flag it; the rows looked exactly like real data because they were real
+data, just written by old code. Cleared afterwards by re-running the deterministic agent on
+both affected uploads, which is free and safe here because `sentinel_record_analysis` replaces
+one producer's findings for one upload rather than appending to them. The rule this leaves
+behind: deploy an agent change before running the e2e suite against it, not after — or if the
+order was unavoidable, re-run the affected agent(s) once the deploy lands, the same way this
+was cleared.
 
 ## Closed since the last note
 
