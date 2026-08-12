@@ -4,6 +4,7 @@ import { AnalysisNotStartedState } from "../components/cases/AnalysisNotStartedS
 import { AnalysisUnavailableState } from "../components/cases/AnalysisUnavailableState";
 import { StepNotBuiltState } from "../components/cases/StepNotBuiltState";
 import { CaseHeader } from "../components/cases/CaseHeader";
+import { DecisionPanel, statusLabels, statusTones } from "../components/decisions/DecisionPanel";
 import { AgentPipeline } from "../components/operations/AgentPipeline";
 import { StatusBadge } from "../components/ui/StatusBadge";
 import { Button } from "../components/ui/Button";
@@ -18,7 +19,7 @@ import type { MemberNameLookup } from "../services/memberNames";
 import { runAgentAcrossUploads, toPipelineStages } from "../services/sentinelAgentRuns";
 import { useCaseAnalysis } from "./useCaseAnalysis";
 import { useAgentRuns } from "./useAgentRuns";
-import type { AgentStage, CaseSummary, DecisionRecord as DecisionRecordData, EvidenceRecord, Finding, SentinelActivityService, SentinelAgentRunService, SentinelAnalysisService, SentinelInvestigationService, SentinelUploadService } from "../domain/types";
+import type { AgentStage, CaseSummary, DecisionRecord as DecisionRecordData, EvidenceRecord, Finding, SentinelActivityService, SentinelAgentRunService, SentinelAnalysisService, SentinelDecisionService, SentinelInvestigationService, SentinelUploadService } from "../domain/types";
 
 const stepCopy: Record<string, { eyebrow: string; title: string; description: string }> = {
   summary: { eyebrow: "Case workspace / summary", title: "Investigation summary", description: "Review current agent progress, risk signals, and the next accountable action." },
@@ -44,6 +45,10 @@ export interface CaseWorkspacePageProps {
   agentRunService?: SentinelAgentRunService | null;
   memberNames?: MemberNameLookup | null;
   demoData?: CaseWorkspaceDemoData;
+  decisionService?: Pick<SentinelDecisionService, "record"> | null;
+  /** Who is looking, so the panel can tell whether this case is theirs. */
+  viewerId?: string | null;
+  role?: "analyst" | "manager" | null;
 }
 
 type LoadState =
@@ -55,7 +60,7 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Try again to reload this persisted investigation.";
 }
 
-export function CaseWorkspacePage({ investigationService, uploadService, activityService, analysisService, agentRunService, memberNames, demoData }: CaseWorkspacePageProps) {
+export function CaseWorkspacePage({ investigationService, uploadService, activityService, analysisService, agentRunService, memberNames, demoData, decisionService, viewerId, role }: CaseWorkspacePageProps) {
   const { caseId = "", step = "summary" } = useParams();
   const [retryKey, setRetryKey] = useState(0);
   const [agentError, setAgentError] = useState<string | null>(null);
@@ -162,7 +167,7 @@ export function CaseWorkspacePage({ investigationService, uploadService, activit
     <div className="case-workspace-page">
       <CaseHeader caseItem={caseItem} currentStep={step} />
       <div className="case-workspace-content">
-        <header className="page-heading page-heading-simple"><div><span className="eyebrow">{content.eyebrow}</span><h2>{content.title}</h2><p>{content.description}</p></div><StatusBadge status={caseItem.status} label={caseItem.status.replace("-", " ")} tone={caseItem.status === "approved" ? "confirm" : "action"} /></header>
+        <header className="page-heading page-heading-simple"><div><span className="eyebrow">{content.eyebrow}</span><h2>{content.title}</h2><p>{content.description}</p></div><StatusBadge status={caseItem.status} label={statusLabels[caseItem.status]} tone={statusTones[caseItem.status]} /></header>
         {demoData ? (
           <>
             {step === "summary" && <><AgentPipeline stages={demoData.pipeline} /><section className="workspace-summary-grid"><div className="summary-note"><span className="section-kicker">Risk signal</span><strong>Beneficiary mismatch needs enhanced review.</strong><p>Two supporting evidence records and one contradictory record are linked to this case.</p></div><div className="summary-note"><span className="section-kicker">Next action</span><strong>Confirm alternate beneficiary notice.</strong><p>Decision stays pending until source package is complete.</p></div></section></>}
@@ -212,11 +217,22 @@ export function CaseWorkspacePage({ investigationService, uploadService, activit
               <AnalysisNotStartedState step={step} stage={caseItem.stageId} />
             )}
 
-            {/* Decision and report have no implementation regardless of stage. Once
-                analysisHasBegun is true for these steps, say that plainly instead of
-                falling through to a panel that would call the case unanalysed. */}
-            {!analysisFailed && analysisHasBegun && (step === "decision" || step === "report") && (
+            {/* Report has no producer at any stage; decision now does. Narrowing this rather
+                than deleting it keeps the distinction the state was built to make: "not
+                started" is a claim about the case, "not built" is a claim about the software. */}
+            {!analysisFailed && analysisHasBegun && step === "report" && (
               <StepNotBuiltState step={step} stage={caseItem.stageId} risk={caseItem.risk} />
+            )}
+            {!analysisFailed && analysisHasBegun && step === "decision" && (
+              <DecisionPanel
+                caseItem={caseItem}
+                viewerId={viewerId ?? null}
+                role={role ?? null}
+                decisionService={decisionService}
+                activityService={activityService}
+                memberNames={memberNames}
+                onDecided={() => setRetryKey((current) => current + 1)}
+              />
             )}
             {step === "summary" && (
               <CaseActivityPanel

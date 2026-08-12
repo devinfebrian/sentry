@@ -77,4 +77,26 @@ describe("ActivityFeed", () => {
 
     expect(screen.getAllByRole("listitem")).toHaveLength(2);
   });
+
+  it("quotes the actor's rationale when the event carries one", () => {
+    renderFeed([entry({
+      type: "case-approved",
+      rationale: "Settlement letter is attached and matches the amount.",
+    })]);
+
+    const row = screen.getByRole("listitem");
+    expect(row).toHaveTextContent("approved this case");
+    expect(within(row).getByText("Settlement letter is attached and matches the amount."))
+      .toBeInTheDocument();
+  });
+
+  it("renders no rationale element for an event that has none", () => {
+    const { container } = render(
+      <MemoryRouter>
+        <ActivityFeed entries={[entry({ type: "parse-started" })]} names={names} />
+      </MemoryRouter>,
+    );
+
+    expect(container.querySelector(".activity-rationale")).toBeNull();
+  });
 });

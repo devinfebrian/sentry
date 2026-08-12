@@ -17,7 +17,7 @@ export type SentinelActivityClient = {
   };
 };
 
-export const ACTIVITY_COLUMNS = "id, investigation_id, actor_id, event_type, metadata, created_at";
+export const ACTIVITY_COLUMNS = "id, investigation_id, actor_id, event_type, rationale, metadata, created_at";
 
 /**
  * Bounded by construction. An audit table only grows, so an unbounded read is a slow leak
@@ -40,6 +40,7 @@ function mapRow(row: ActivityRow): ActivityEntry {
     investigationId: row.investigation_id,
     actorId: row.actor_id,
     type: row.event_type as ActivityEventType,
+    rationale: row.rationale,
     metadata: mapMetadata(row.metadata),
     occurredAt: row.created_at,
   };

@@ -71,6 +71,18 @@ export function describeActivity(entry: ActivityEntry, names?: MemberNames): str
     }
     case "member-invite-rejected":
       return `rejected the invitation for ${subject(metadata, names)}`;
+    case "case-recommended": {
+      const recommendation = text(metadata, "recommendation");
+      if (recommendation === "approve") return "recommended approving this case";
+      if (recommendation === "reject") return "recommended rejecting this case";
+      return "recorded a recommendation";
+    }
+    case "case-approved":
+      return "approved this case";
+    case "case-rejected":
+      return "rejected this case";
+    case "case-evidence-requested":
+      return "asked for more evidence";
     default:
       // The event_type CHECK constraint can gain a value before this map does. Degrading
       // to the raw type keeps the feed readable instead of blank or thrown.

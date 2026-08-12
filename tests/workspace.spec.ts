@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { fixturePath, requireCredentials, storageStatePath } from "./env";
+import { fixturePath, requireCredentials, requireServiceRoleKey, storageStatePath } from "./env";
 
 const { supabaseUrl, publishableKey } = requireCredentials("analyst");
 
@@ -45,6 +45,97 @@ async function restRequest(token: string, path: string, init: RequestInit = {}) 
 
 async function api(page: Page, path: string, init: RequestInit = {}) {
   return restRequest(await accessToken(page), path, init);
+}
+
+async function adminRest(path: string, init: RequestInit = {}) {
+  const secretKey = requireServiceRoleKey();
+  const response = await fetch(`${supabaseUrl}/rest/v1/${path}`, {
+    ...init,
+    headers: {
+      apikey: secretKey,
+      Authorization: `Bearer ${secretKey}`,
+      "Content-Type": "application/json",
+      Prefer: "return=representation",
+      ...(init.headers ?? {}),
+    },
+  });
+  const text = await response.text();
+  return { status: response.status, body: text ? JSON.parse(text) : null };
+}
+
+type SeededDecidableCase = { id: string; reference: string };
+
+/**
+ * One upload row and no sentinel_agent_runs rows lands the queue's derived stage on
+ * "awaiting-analysis" -- anything past "awaiting-import" is what DecisionPanel requires
+ * before it mounts (see CaseWorkspacePage.test.tsx's "analysis has not started" case).
+ * Mirrors decisions.spec.ts's seedCase(withUpload: true), returning the reference too since
+ * this test navigates by URL rather than by REST id.
+ */
+async function seedDecidableCase(options: { workspaceId: string; ownerId: string }): Promise<SeededDecidableCase> {
+  const suffix = `${Date.now().toString(36)}${Math.floor(Math.random() * 1e4)}`.toUpperCase();
+  const reference = `INV-E2E${suffix}`;
+  const created = await adminRest("sentinel_investigations", {
+    method: "POST",
+    body: JSON.stringify({
+      workspace_id: options.workspaceId,
+      reference,
+      entity: "Handoff walkthrough fixture",
+      owner_id: options.ownerId,
+      created_by: options.ownerId,
+      status: "open",
+    }),
+  });
+  expect(created.status, `seed investigation: ${JSON.stringify(created.body)}`).toBe(201);
+  const id = created.body[0].id as string;
+
+  const uploadId = crypto.randomUUID();
+  const upload = await adminRest("sentinel_uploads", {
+    method: "POST",
+    body: JSON.stringify({
+      id: uploadId,
+      workspace_id: options.workspaceId,
+      investigation_id: id,
+      // The storage_path CHECK requires workspace/investigation/upload/filename.
+      storage_path: `${options.workspaceId}/${id}/${uploadId}/seed.csv`,
+      original_name: "seed.csv",
+      extension: "csv",
+      byte_size: 128,
+      status: "parsed",
+      row_count: 3,
+      uploaded_by: options.ownerId,
+    }),
+  });
+  expect(upload.status, `seed upload: ${JSON.stringify(upload.body)}`).toBe(201);
+
+  return { id, reference };
+}
+
+/**
+ * Events must go first, and specifically through the purge RPC, not a REST DELETE.
+ * sentinel_activity_events is append-only by grant omission -- service_role has only INSERT
+ * on it, so a direct DELETE always 403s. That 403 was previously swallowed silently: the
+ * investigation still got removed afterward, and because investigation_id is `on delete set
+ * null`, its events survived as orphans instead of being removed. sentinel_purge_investigation_
+ * events is the one path narrow enough to be granted to service_role without reopening the
+ * audit trail to authenticated, so it runs first, scoped to every event this investigation's
+ * fixtures produced (not only case-* -- seeding it also fires the foundation triggers that
+ * write investigation-created and upload-created), and its result is checked -- a cleanup
+ * that fails silently is exactly how that bug went unnoticed. The two DELETEs after it are
+ * checked for the same reason. Mirrors decisions.spec.ts's removeCase.
+ */
+async function removeSeededCase(id: string) {
+  const purged = await adminRest("rpc/sentinel_purge_investigation_events", {
+    method: "POST",
+    body: JSON.stringify({ p_investigation_id: id }),
+  });
+  expect(purged.status, `purge investigation events: ${JSON.stringify(purged.body)}`).toBeLessThan(300);
+
+  const uploadsRemoved = await adminRest(`sentinel_uploads?investigation_id=eq.${id}`, { method: "DELETE" });
+  expect(uploadsRemoved.status, `delete seeded uploads: ${JSON.stringify(uploadsRemoved.body)}`).toBeLessThan(300);
+
+  const investigationRemoved = await adminRest(`sentinel_investigations?id=eq.${id}`, { method: "DELETE" });
+  expect(investigationRemoved.status, `delete seeded investigation: ${JSON.stringify(investigationRemoved.body)}`).toBeLessThan(300);
 }
 
 function importDialog(page: Page) {
@@ -274,12 +365,34 @@ test.describe("analyst workspace", () => {
 
     await stageFilter.selectOption(stageValue!);
 
-    await expect(dataRows.first()).toBeVisible();
-    const filteredCount = await dataRows.count();
-    expect(filteredCount).toBeGreaterThan(0);
-    for (let index = 0; index < filteredCount; index += 1) {
-      await expect(dataRows.nth(index).locator("td").nth(1)).toHaveText(stageLabel);
-    }
+    // Re-read the whole column together, and retry the whole read, rather than reading once
+    // right after selectOption(). Two failure modes live here, and both come from the same
+    // root cause: this suite runs fullyParallel against a workspace shared with every other
+    // spec plus the decision-handoff test's own seed and delete, so the table this test reads
+    // can keep changing under it.
+    //   1. selectOption() only waits for the <select>'s DOM value to change and its change
+    //      event to fire -- not for CaseQueue's own re-render in response -- and a row already
+    //      visible under the *previous*, unfiltered view satisfies a bare toBeVisible() with
+    //      nothing left to wait for, so that check alone does not prove the filtered render has
+    //      landed. Read too early and the "filtered" rows are still the old unfiltered set.
+    //   2. Counting the rows once and then re-querying by index in a loop afterwards -- N
+    //      sequential awaited round trips against a live DOM -- leaves a window after the count
+    //      for a concurrent seed or delete to shift row order out from under a stale index,
+    //      surfacing as "element(s) not found".
+    // allTextContents() sidesteps #2 by reading the whole column in one call, so there is no
+    // window between reads for a row to have moved. expect.poll sidesteps #1 by re-running that
+    // one-call read on every attempt until the filtered table has actually settled, rather than
+    // trusting the first read to already reflect it -- and only fails for real once a mismatch
+    // survives every retry, which is what a genuine product bug would do.
+    //
+    // td:nth-of-type(2) is the stage column: the row's first cell is a th[scope="row"] (the
+    // case link), not a td, so the stage column's position among the row's td siblings (2nd) is
+    // one less than its position among all cells -- nth-of-type counts only same-tag siblings,
+    // so it lands on the right cell without depending on the th's presence.
+    await expect.poll(async () => {
+      const labels = await dataRows.locator("td:nth-of-type(2)").allTextContents();
+      return labels.length > 0 && labels.every((label) => label.trim() === stageLabel);
+    }, { message: "every filtered row must show the selected stage" }).toBe(true);
   });
 
   test("rejects an unsupported file extension with a readable error", async ({ page }) => {
@@ -483,5 +596,76 @@ test.describe("responsive shell", () => {
     await expect(page.getByRole("dialog", { name: "Workspace navigation" })).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(menuButton).toBeFocused();
+  });
+});
+
+test.describe("deciding a case", () => {
+  test.use({ storageState: storageStatePath("analyst") });
+
+  test("an analyst recommends and a manager approves", async ({ page, browser }) => {
+    await page.goto("/cases");
+    await page.getByRole("heading", { name: "Cases" }).waitFor();
+    const analystToken = await accessToken(page);
+    const analystId = subjectOf(analystToken);
+    const workspaceId = (await restRequest(analystToken, "sentinel_members?select=workspace_id&limit=1")).body[0].workspace_id;
+
+    // Seeded rather than borrowed: a decision advances status and appends events, so running
+    // this against a case from the shared backlog would leave it decided for every later run.
+    const seeded = await seedDecidableCase({ workspaceId, ownerId: analystId });
+
+    try {
+      await page.goto(`/cases/${seeded.reference}/decision`);
+      // The decision step's static page heading (from stepCopy) always reads "Decision
+      // record" whether or not DecisionPanel mounted, so it cannot tell "seeded case with a
+      // real panel" apart from "case still on the not-built placeholder". The panel's own
+      // <section aria-labelledby="decision-panel-title"> gets an implicit ARIA "region" role
+      // from having an accessible name; only a mounted panel provides that role.
+      await expect(page.getByRole("region", { name: "Decision record" })).toBeVisible();
+
+      await page.getByRole("button", { name: /recommend approve/i }).click();
+      await page.getByRole("textbox", { name: /rationale/i })
+        .fill("Outlier is the annual settlement, confirmed against the ledger.");
+      await page.getByRole("button", { name: /^record decision$/i }).click();
+
+      // Assert the positive before any absence: this proves the panel re-rendered on real
+      // data, which is what makes the missing-button check below mean anything. The page
+      // heading badge above the panel now shares the same statusLabels mapping (the Important-1
+      // fix for the two badges drifting), so "Pending approval" legitimately renders twice on
+      // this page; scoping to the panel's own region keeps this assertion pinned to the one
+      // element it means to check, same as the "Approved" assertion further down.
+      await expect(
+        page.getByRole("region", { name: "Decision record" }).getByText("Pending approval", { exact: true }),
+      ).toBeVisible();
+      await expect(page.getByText("Outlier is the annual settlement, confirmed against the ledger.")).toBeVisible();
+      await expect(page.getByRole("button", { name: /recommend approve/i })).toHaveCount(0);
+
+      const managerContext = await browser.newContext({ storageState: storageStatePath("manager") });
+      try {
+        const managerPage = await managerContext.newPage();
+        await managerPage.goto(`/cases/${seeded.reference}/decision`);
+        await expect(managerPage.getByRole("region", { name: "Decision record" })).toBeVisible();
+        await expect(managerPage.getByText("Outlier is the annual settlement, confirmed against the ledger.")).toBeVisible();
+
+        await managerPage.getByRole("button", { name: /^approve$/i }).click();
+        await managerPage.getByRole("textbox", { name: /rationale/i }).fill("Ledger checks out. Approved.");
+        await managerPage.getByRole("button", { name: /^record decision$/i }).click();
+
+        // The decision history's own feed narrates the same event in lowercase prose
+        // ("approved this case"), which getByText's case-insensitive substring match would
+        // also catch, so the status badge is targeted through the region to keep this
+        // assertion pinned to the one element it means to check.
+        await expect(
+          managerPage.getByRole("region", { name: "Decision record" }).getByText("Approved", { exact: true }),
+        ).toBeVisible();
+
+        // The workspace feed carries it too, with both sets of words.
+        await managerPage.goto("/activity");
+        await expect(managerPage.getByText("Ledger checks out. Approved.")).toBeVisible();
+      } finally {
+        await managerContext.close();
+      }
+    } finally {
+      await removeSeededCase(seeded.id);
+    }
   });
 });

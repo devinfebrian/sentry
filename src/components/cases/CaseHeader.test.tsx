@@ -9,6 +9,7 @@ const analysedCase: CaseSummary = {
   databaseId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
   entity: "Acme Holdings",
   owner: "test-user",
+  ownerId: null,
   risk: "high",
   stageId: "analysed",
   status: "review",

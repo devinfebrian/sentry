@@ -48,14 +48,30 @@ export interface AgentStage {
   outputCount?: number;
 }
 
+export type CaseStatus = "open" | "review" | "approved" | "closed";
+
+export type DecisionAction =
+  | "recommend-approve"
+  | "recommend-reject"
+  | "approve"
+  | "reject"
+  | "request-evidence";
+
+export interface SentinelDecisionService {
+  record(investigationId: string, action: DecisionAction, rationale: string): Promise<{ status: CaseStatus }>;
+}
+
 export interface CaseSummary {
   id: string;
   databaseId: string;
   entity: string;
+  /** The resolved display name, for reading. */
   owner: string;
+  /** The identifier, for deciding whether the viewer is the owner. */
+  ownerId: string | null;
   risk: RiskLevel;
   stageId: CaseStage;
-  status: "open" | "review" | "approved" | "closed";
+  status: CaseStatus;
   ageDays: number;
   lastActivity: string;
 }
@@ -114,7 +130,7 @@ export interface Finding {
   contradictoryEvidenceIds: string[];
 }
 
-/** The nine values permitted by the sentinel_activity_events event_type CHECK. */
+/** The fifteen values permitted by the sentinel_activity_events event_type CHECK. */
 export type ActivityEventType =
   | "investigation-created"
   | "upload-created"
@@ -124,7 +140,13 @@ export type ActivityEventType =
   | "member-invited"
   | "member-activated"
   | "member-role-changed"
-  | "member-invite-rejected";
+  | "member-invite-rejected"
+  | "analysis-completed"
+  | "analysis-failed"
+  | "case-recommended"
+  | "case-approved"
+  | "case-rejected"
+  | "case-evidence-requested";
 
 /**
  * A recorded workspace event. Deliberately distinct from `ActivityEvent` below, which is a
@@ -138,6 +160,11 @@ export interface ActivityEntry {
   /** jsonb, so the shape varies per event type — read it through safe accessors. */
   metadata: Record<string, unknown>;
   occurredAt: string;
+  /**
+   * The actor's own words, on the events that have an author. Null everywhere else — a
+   * parse did not have a reason, it had a result.
+   */
+  rationale?: string | null;
 }
 
 /** Findings and their evidence for one investigation, read together. */

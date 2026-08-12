@@ -1,8 +1,9 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import type { ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
-import type { CaseSummary, SentinelInvestigationService } from "../domain/types";
+import type { CaseSummary, SentinelActivityService, SentinelDecisionService, SentinelInvestigationService } from "../domain/types";
 import { fixtureCases, fixtureDecision, fixtureEvidence, fixtureFindings, fixturePipeline } from "../demo/fixtures";
 import { CaseWorkspacePage } from "./CaseWorkspacePage";
 
@@ -11,6 +12,7 @@ const importedCase: CaseSummary = {
   databaseId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
   entity: "Imported Company",
   owner: "test-user",
+  ownerId: null,
   risk: "not-assessed",
   stageId: "awaiting-import",
   status: "open",
@@ -31,6 +33,42 @@ function renderWorkspace(
       </Routes>
     </MemoryRouter>,
   );
+}
+
+const decisionViewerId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+
+const analysedCase: CaseSummary = {
+  ...importedCase,
+  id: "INV-ANALYSED2",
+  ownerId: decisionViewerId,
+  stageId: "analysed",
+  risk: "high",
+  status: "open",
+};
+
+/**
+ * Renders the case workspace for a persisted case, stubbing the services DecisionPanel
+ * needs so its own tests can focus on which panel the workspace chose rather than on
+ * plumbing every service through by hand each time.
+ */
+function renderCasePage({
+  step = "summary",
+  caseItem,
+  role = null,
+  viewerId = decisionViewerId,
+}: {
+  step?: string;
+  caseItem: CaseSummary;
+  role?: "analyst" | "manager" | null;
+  viewerId?: string | null;
+}) {
+  const service = { getById: vi.fn(async () => caseItem) };
+  const decisionService: Pick<SentinelDecisionService, "record"> = {
+    record: vi.fn(async () => ({ status: "review" as const })),
+  };
+  const activityService: SentinelActivityService = { list: vi.fn(async () => []) };
+  const view = renderWorkspace(service, step, { viewerId, role, decisionService, activityService });
+  return { ...view, service, decisionService, activityService };
 }
 
 const analysisWith = (findings: unknown[], evidence: unknown[] = []) => ({
@@ -92,12 +130,14 @@ describe("CaseWorkspacePage analysis", () => {
 
   it("says the step is not built rather than that analysis has not started, once the case is analysed", async () => {
     // Regression coverage for the panel contradicting itself: a case at stage "analysed"
-    // with findings on record must never render "Analysis not started" on decision or
-    // report just because those two steps have no producer of their own.
+    // with findings on record must never render "Analysis not started" on report just
+    // because that step has no producer of its own. Decision used to share this fate too,
+    // until DecisionPanel gave it a real implementation — see the "decision step" describe
+    // block below for its own coverage now that it renders something real.
     const analysedCase: CaseSummary = { ...importedCase, id: "INV-ANALYSED1", stageId: "analysed", risk: "high" };
     const analysedService = { getById: vi.fn(async () => analysedCase) };
 
-    renderWorkspace(analysedService, "decision", { analysisService: analysisWith([realFinding], [realEvidence]) });
+    renderWorkspace(analysedService, "report", { analysisService: analysisWith([realFinding], [realEvidence]) });
 
     expect(await screen.findByRole("heading", { name: /this step is not built yet/i })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: /analysis not started/i })).not.toBeInTheDocument();
@@ -174,5 +214,84 @@ describe("CaseWorkspacePage", () => {
 
     expect(screen.getByRole("heading", { name: /northstar ltd/i })).toBeInTheDocument();
     expect(screen.getByText("Beneficiary mismatch needs enhanced review.")).toBeInTheDocument();
+  });
+});
+
+describe("CaseWorkspacePage heading status badge", () => {
+  // The page heading badge and DecisionPanel's own badge render the same caseItem.status
+  // through the same statusLabels/statusTones exported from DecisionPanel.tsx, so they
+  // cannot drift the way they used to: the heading used to run
+  // caseItem.status.replace("-", " ") (a no-op — no CaseStatus value has a hyphen) with its
+  // own ad hoc tone rule, so a case in "review" showed "review" up top and "Pending
+  // approval" in the panel below it.
+  it("shows the mapped status label, not the raw status string", async () => {
+    const reviewCase: CaseSummary = { ...importedCase, id: "INV-REVIEW1", status: "review" };
+    const service = { getById: vi.fn(async () => reviewCase) };
+
+    const { container } = renderWorkspace(service, "summary");
+
+    await screen.findByRole("heading", { name: /investigation summary/i });
+    const badge = container.querySelector(".page-heading-simple .status-badge");
+    expect(badge).not.toBeNull();
+    expect(badge).toHaveTextContent("Pending approval");
+    expect(badge!.className).toContain("status-action");
+  });
+
+  it("paints a closed case with the risk tone, matching the panel rather than the old action/confirm split", async () => {
+    const closedCase: CaseSummary = { ...importedCase, id: "INV-CLOSED1", status: "closed" };
+    const service = { getById: vi.fn(async () => closedCase) };
+
+    const { container } = renderWorkspace(service, "summary");
+
+    await screen.findByRole("heading", { name: /investigation summary/i });
+    const badge = container.querySelector(".page-heading-simple .status-badge");
+    expect(badge).toHaveTextContent("Closed");
+    expect(badge!.className).toContain("status-risk");
+  });
+});
+
+describe("CaseWorkspacePage decision step", () => {
+  // The decision step's static page heading (from stepCopy) always reads "Decision record",
+  // whether or not the panel below it is built — so a "heading named Decision record" query
+  // cannot distinguish "panel present" from "panel absent" on this step. DecisionPanel's own
+  // <section aria-labelledby="decision-panel-title"> gets an implicit ARIA "region" role from
+  // having an accessible name, which the plain <header> above it does not, so querying by
+  // that role is what actually asserts the panel mounted.
+  it("puts a real decision panel on the decision step of an analysed case", async () => {
+    renderCasePage({ step: "decision", caseItem: analysedCase, role: "analyst" });
+
+    expect(await screen.findByRole("region", { name: "Decision record" })).toBeInTheDocument();
+    expect(screen.queryByText(/this step is not built yet/i)).not.toBeInTheDocument();
+  });
+
+  it("still says the report step is not built", async () => {
+    renderCasePage({ step: "report", caseItem: analysedCase, role: "analyst" });
+
+    expect(await screen.findByText(/this step is not built yet/i)).toBeInTheDocument();
+  });
+
+  it("says analysis has not started on the decision step of a case awaiting import", async () => {
+    renderCasePage({ step: "decision", caseItem: { ...analysedCase, stageId: "awaiting-import" }, role: "analyst" });
+
+    expect(await screen.findByRole("heading", { name: /analysis not started/i })).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Decision record" })).not.toBeInTheDocument();
+  });
+
+  // The whole point of wiring onDecided to setRetryKey is that a recorded decision is
+  // reflected back to the reader without a manual reload — a decision that updates the
+  // database but leaves the page showing the old status is exactly the bug this slice
+  // exists to remove. This asserts the re-read actually happens, not just that the write
+  // succeeded.
+  it("re-reads the case after a decision is recorded, so the page stops showing stale state", async () => {
+    const { service } = renderCasePage({ step: "decision", caseItem: analysedCase, role: "analyst" });
+
+    await screen.findByRole("region", { name: "Decision record" });
+    expect(service.getById).toHaveBeenCalledTimes(1);
+
+    await userEvent.click(await screen.findByRole("button", { name: /recommend approve/i }));
+    await userEvent.type(screen.getByRole("textbox", { name: /rationale/i }), "Evidence supports approval.");
+    await userEvent.click(screen.getByRole("button", { name: /^record decision$/i }));
+
+    await waitFor(() => expect(service.getById).toHaveBeenCalledTimes(2));
   });
 });

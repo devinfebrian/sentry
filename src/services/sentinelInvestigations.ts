@@ -1,5 +1,5 @@
 import type { PostgrestMaybeSingleResponse, PostgrestResponse, PostgrestSingleResponse } from "@supabase/supabase-js";
-import type { CaseStage, CaseSummary, RiskLevel, SentinelInvestigationService } from "../domain/types";
+import type { CaseStage, CaseStatus, CaseSummary, RiskLevel, SentinelInvestigationService } from "../domain/types";
 import type { Database } from "../lib/database.types";
 
 /**
@@ -13,7 +13,7 @@ type InvestigationRow = {
   reference: string;
   entity: string;
   owner_id: string | null;
-  status: "open" | "review" | "approved" | "closed";
+  status: CaseStatus;
   created_at: string;
   updated_at: string;
   risk: RiskLevel;
@@ -112,6 +112,7 @@ function mapRow(row: InvestigationRow, names?: OwnerNames): CaseSummary {
     databaseId: row.id,
     entity: row.entity,
     owner: resolveOwner(row.owner_id, names),
+    ownerId: row.owner_id,
     risk: row.risk,
     stageId: toStage(row.stage),
     status: row.status,

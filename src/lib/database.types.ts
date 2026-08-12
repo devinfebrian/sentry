@@ -287,7 +287,13 @@ export type Database = {
             | "member-invited"
             | "member-activated"
             | "member-role-changed"
-            | "member-invite-rejected";
+            | "member-invite-rejected"
+            | "analysis-completed"
+            | "analysis-failed"
+            | "case-recommended"
+            | "case-approved"
+            | "case-rejected"
+            | "case-evidence-requested";
           rationale: string | null;
           metadata: Json;
           created_at: string;
@@ -306,7 +312,13 @@ export type Database = {
             | "member-invited"
             | "member-activated"
             | "member-role-changed"
-            | "member-invite-rejected";
+            | "member-invite-rejected"
+            | "analysis-completed"
+            | "analysis-failed"
+            | "case-recommended"
+            | "case-approved"
+            | "case-rejected"
+            | "case-evidence-requested";
           rationale?: string | null;
           metadata?: Json;
           created_at?: string;
@@ -325,7 +337,13 @@ export type Database = {
             | "member-invited"
             | "member-activated"
             | "member-role-changed"
-            | "member-invite-rejected";
+            | "member-invite-rejected"
+            | "analysis-completed"
+            | "analysis-failed"
+            | "case-recommended"
+            | "case-approved"
+            | "case-rejected"
+            | "case-evidence-requested";
           rationale?: string | null;
           metadata?: Json;
           created_at?: string;

@@ -14,10 +14,10 @@ interface ActivityFeedProps {
   caseReferences?: ReadonlyMap<string, string>;
 }
 
-/** Parse failures are the only events a reader needs to act on. */
+/** Failures and rejections read as risk; completions and approvals read as confirmed. */
 function toneFor(type: ActivityEntry["type"]) {
-  if (type === "parse-failed" || type === "member-invite-rejected") return "risk" as const;
-  if (type === "parse-completed" || type === "member-activated") return "confirm" as const;
+  if (type === "parse-failed" || type === "member-invite-rejected" || type === "case-rejected") return "risk" as const;
+  if (type === "parse-completed" || type === "member-activated" || type === "case-approved") return "confirm" as const;
   return "action" as const;
 }
 
@@ -43,6 +43,7 @@ export function ActivityFeed({ entries, names, showCaseLinks = true, caseReferen
                   <Link className="text-link" to={`/cases/${reference}/summary`}>{reference}</Link>
                 </>
               )}
+              {entry.rationale && <span className="activity-rationale">{entry.rationale}</span>}
             </span>
             <time dateTime={entry.occurredAt}>{formatRelative(entry.occurredAt)}</time>
           </li>

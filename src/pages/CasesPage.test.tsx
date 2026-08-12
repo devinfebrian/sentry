@@ -10,6 +10,7 @@ const importedCase: CaseSummary = {
   databaseId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
   entity: "Imported Company",
   owner: "test-user",
+  ownerId: null,
   risk: "not-assessed",
   stageId: "awaiting-import",
   status: "open",

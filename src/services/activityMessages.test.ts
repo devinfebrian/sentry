@@ -78,7 +78,35 @@ describe("describeActivity", () => {
 
   it("stays readable for an event type it has never seen", () => {
     // The CHECK constraint can gain a value before this map does.
-    expect(describeActivity(entry("case-approved"))).toBe("case approved");
+    expect(describeActivity(entry("member-suspended"))).toBe("member suspended");
+  });
+
+  it("reads a recommendation as the recommendation, not the event name", () => {
+    const sentence = describeActivity(
+      entry("case-recommended", { recommendation: "approve", from_status: "open", to_status: "review" }),
+      names,
+    );
+    expect(sentence).toBe("recommended approving this case");
+  });
+
+  it("names the opposite recommendation too", () => {
+    const sentence = describeActivity(
+      entry("case-recommended", { recommendation: "reject" }),
+      names,
+    );
+    expect(sentence).toBe("recommended rejecting this case");
+  });
+
+  it("falls back when a recommendation event carries no recommendation", () => {
+    expect(describeActivity(entry("case-recommended", {}), names))
+      .toBe("recorded a recommendation");
+  });
+
+  it("reads the three manager decisions", () => {
+    expect(describeActivity(entry("case-approved", {}), names)).toBe("approved this case");
+    expect(describeActivity(entry("case-rejected", {}), names)).toBe("rejected this case");
+    expect(describeActivity(entry("case-evidence-requested", {}), names))
+      .toBe("asked for more evidence");
   });
 });
 
